@@ -95,6 +95,20 @@ test_that("a slow server does not block construction beyond start_wait", {
   expect_true(client$variation("f", ld_context("u"), FALSE))
 })
 
+test_that("unknown SSE event names are ignored even with non-JSON bodies", {
+  mock <- local_mock_ld()
+  body <- paste0("event: future-thing\ndata: <not json>\n\n",
+                 "event: future-json\ndata: {\"a\":1}\n\n",
+                 fdv2_sse_body(list(simple_flag("f"))))
+  mock$script("/sdk/stream", list(status = 200L, headers = list(`Content-Type` = "text/event-stream"),
+                                  body = body))
+  got <- NULL
+  res <- fdv2_stream_once(list(sdk_key = "k", stream_uri = mock$url, read_timeout = 5),
+                          on_changeset = function(cs) got <<- cs, until_first_payload = TRUE)
+  expect_true(res$ok)
+  expect_equal(got$puts[[1]]$key, "f")
+})
+
 test_that("streaming delivers updates and survives a malformed SSE event", {
   mock <- local_mock_ld()
   good <- fdv2_sse_body(list(simple_flag("f")))

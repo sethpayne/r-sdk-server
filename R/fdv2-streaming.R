@@ -144,6 +144,13 @@ fdv2_stream_once <- function(config, selector = NULL, on_changeset = NULL,
     if (identical(event_name, "message") && !nzchar(ev$data %||% "")) return(NULL)
     if (identical(event_name, "ping") || identical(event_name, "heartbeat")) return(NULL)
 
+    # Unknown event names are ignored before parsing: their bodies need not be JSON.
+    known <- event_name %in% c(
+      LD_EVENT_SERVER_INTENT, LD_EVENT_PUT_OBJECT, LD_EVENT_DELETE_OBJECT,
+      LD_EVENT_PAYLOAD_TRANSFERRED, "goodbye", "error"
+    )
+    if (!known) return(NULL)
+
     data <- NULL
     if (nzchar(ev$data %||% "")) {
       data <- tryCatch(
@@ -154,12 +161,6 @@ fdv2_stream_once <- function(config, selector = NULL, on_changeset = NULL,
     if (inherits(data, "ld_sse_parse_error")) {
       return(list(ok = FALSE, error = "malformed SSE JSON", reconnect = TRUE, fallback_to_fdv1 = FALSE))
     }
-
-    known <- event_name %in% c(
-      LD_EVENT_SERVER_INTENT, LD_EVENT_PUT_OBJECT, LD_EVENT_DELETE_OBJECT,
-      LD_EVENT_PAYLOAD_TRANSFERRED, "goodbye", "error"
-    )
-    if (!known) return(NULL)
 
     if (identical(event_name, "goodbye")) {
       return(list(ok = FALSE, error = "goodbye", reconnect = TRUE, fallback_to_fdv1 = FALSE))
