@@ -24,7 +24,7 @@ Living matrix (updated as milestones land). Source of feature list: [python-serv
 | `flush` / `close` | yes | **done (M4/M6)** | |
 | Offline mode | yes | **done (M4)** | |
 | FDv2 data system | yes (9.13+) | **done (M4/M7)** | Only FDv2; see DESIGN.md |
-| Streaming synchronizer | yes | **done (M7)** | Primary sync + poll fallback |
+| Streaming synchronizer | yes | **done (M7/DoD)** | curl-multi SSE; secondary after 401/403; poll fallback |
 | Polling initializer + fallback sync | yes | **done (M4/M7)** | Default chain parity |
 | FDv1 data source / fdv1 fallback sync | yes | **out** | Fail-safe + log if server requests fallback (DESIGN §4) |
 | App metadata | yes | **done** | Tags header |

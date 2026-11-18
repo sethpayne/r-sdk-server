@@ -9,6 +9,8 @@ LD_ENVID_HEADER <- "x-ld-envid"
 
 # Allowed tag value charset (sdk-test-harness allAllowedTagChars)
 .ld_tag_value_re <- "^[._a-zA-Z0-9-]+$"
+# sdk-test-harness maxTagValueLength
+.ld_tag_value_max_len <- 64L
 
 #' Validate and build `X-LaunchDarkly-Tags` header value
 #' @keywords internal
@@ -17,8 +19,10 @@ LD_ENVID_HEADER <- "x-ld-envid"
   app_id <- config$application_id
   app_ver <- config$application_version
   id_ok <- is.character(app_id) && length(app_id) == 1L && nzchar(app_id) &&
+    nchar(app_id, type = "chars") <= .ld_tag_value_max_len &&
     grepl(.ld_tag_value_re, app_id)
   ver_ok <- is.character(app_ver) && length(app_ver) == 1L && nzchar(app_ver) &&
+    nchar(app_ver, type = "chars") <= .ld_tag_value_max_len &&
     grepl(.ld_tag_value_re, app_ver)
   if (id_ok) parts <- c(parts, paste0("application-id/", app_id))
   if (ver_ok) parts <- c(parts, paste0("application-version/", app_ver))

@@ -40,20 +40,31 @@ ClientEntity <- R6::R6Class(
         if (!is.null(st$initialRetryDelayMs)) {
           opts$initial_reconnect_delay <- st$initialRetryDelayMs / 1000
         }
+        # Legacy streaming block without polling → do not probe default poll URI.
+        if (is.null(configuration$polling) && is.null(configuration$dataSystem)) {
+          opts$stream_only <- TRUE
+          opts$skip_poll_init <- TRUE
+        }
       }
 
       # FDv2 dataSystem (harness v3)
       ds <- configuration$dataSystem
       if (!is.null(ds)) {
         inits <- ds$initializers %||% list()
+        poll_init_uris <- character()
         for (init in inits) {
           if (!is.null(init$polling)) {
-            if (!is.null(init$polling$baseUri)) opts$base_uri <- init$polling$baseUri
+            if (!is.null(init$polling$baseUri)) {
+              # Preserve order — harness expects each initializer endpoint to be hit.
+              poll_init_uris <- c(poll_init_uris, init$polling$baseUri)
+              opts$base_uri <- init$polling$baseUri
+            }
             if (!is.null(init$polling$pollIntervalMs)) {
               opts$poll_interval <- init$polling$pollIntervalMs / 1000
             }
           }
         }
+        if (length(poll_init_uris) > 0L) opts$poll_init_uris <- as.list(poll_init_uris)
         syncs <- ds$synchronizers %||% list()
         if (length(syncs) >= 1L) {
           s0 <- syncs[[1]]
@@ -64,7 +75,7 @@ ClientEntity <- R6::R6Class(
               opts$initial_reconnect_delay <- s0$streaming$initialRetryDelayMs / 1000
             }
             # Stream-only when no polling initializer was provided
-            if (length(inits) == 0L) {
+            if (length(poll_init_uris) == 0L) {
               opts$stream_only <- TRUE
               opts$skip_poll_init <- TRUE
             }
@@ -78,7 +89,7 @@ ClientEntity <- R6::R6Class(
               }
               opts$sync_poll_uri <- s0$polling$baseUri
               # When there is no separate initializer, sync URI is also the init URI.
-              if (length(inits) == 0L) opts$base_uri <- s0$polling$baseUri
+              if (length(poll_init_uris) == 0L) opts$base_uri <- s0$polling$baseUri
             }
             if (!is.null(s0$polling$pollIntervalMs)) {
               opts$poll_interval <- s0$polling$pollIntervalMs / 1000
@@ -130,6 +141,7 @@ ClientEntity <- R6::R6Class(
       if (!is.null(opts$sync_poll_uri)) cfg$sync_poll_uri <- opts$sync_poll_uri
       if (!is.null(opts$fallback_poll_uri)) cfg$fallback_poll_uri <- opts$fallback_poll_uri
       if (!is.null(opts$fallback_stream_uri)) cfg$fallback_stream_uri <- opts$fallback_stream_uri
+      if (!is.null(opts$poll_init_uris)) cfg$poll_init_uris <- opts$poll_init_uris
       if (isTRUE(opts$stream_only)) cfg$stream_only <- TRUE
       if (isTRUE(opts$skip_poll_init)) cfg$skip_poll_init <- TRUE
 

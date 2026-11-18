@@ -33,6 +33,7 @@ LdConfig <- R6::R6Class(
     sync_poll_uri = NULL,
     fallback_poll_uri = NULL,
     fallback_stream_uri = NULL,
+    poll_init_uris = NULL,
     stream_only = FALSE,
     skip_poll_init = FALSE,
 
@@ -70,6 +71,7 @@ LdConfig <- R6::R6Class(
         sync_poll_uri = self$sync_poll_uri,
         fallback_poll_uri = self$fallback_poll_uri,
         fallback_stream_uri = self$fallback_stream_uri,
+        poll_init_uris = as.list(self$poll_init_uris %||% list()),
         stream_only = isTRUE(self$stream_only),
         skip_poll_init = isTRUE(self$skip_poll_init)
       )

@@ -114,17 +114,48 @@ do_poll <- function(use_sync_uri = FALSE) {
   result
 }
 
-do_stream <- function() {
-  # Keep the SSE connection open and apply every payload-transferred until the
-  # server goodbye/errors or the read timeout elapses (harness multi-update suites).
+pump_ipc <- function() {
+  # Drain stdin while a long-lived stream is open so Flush/Track/Shutdown still work.
+  repeat {
+    line <- tryCatch(readLines(stdin_con, n = 1L, warn = FALSE), error = function(e) character())
+    if (length(line) == 0L) break
+    msg <- tryCatch(jsonlite::fromJSON(line, simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(msg) || is.null(msg$type)) next
+    type <- msg$type
+    if (identical(type, "Shutdown")) {
+      flush_events()
+      running <<- FALSE
+    } else if (identical(type, "Ping")) {
+      emit("Pong", list(), id = msg$id)
+    } else if (identical(type, "Flush")) {
+      flush_events()
+    } else if (identical(type, "Track")) {
+      if (!is.null(buffer)) {
+        buffer$add_custom(msg$payload$event_name, msg$payload$context, msg$payload$data, msg$payload$metric_value)
+      }
+    } else if (identical(type, "Identify")) {
+      if (!is.null(buffer)) buffer$add_identify(msg$payload$context)
+    }
+  }
+  invisible(NULL)
+}
+
+do_stream <- function(until_first_payload = TRUE) {
+  # During init, stop at first payload so Ready can be emitted. The main loop
+  # may keep the connection open (until_first_payload = FALSE) for multi-update.
+  on_cs <- function(cs) {
+    apply_ok_changeset(list(ok = TRUE, changeset = cs))
+    selector <<- store$selector()
+  }
   result <- fdv2_stream_once(
     config,
     selector,
-    on_changeset = function(cs) {
-      apply_ok_changeset(list(ok = TRUE, changeset = cs))
-      selector <<- store$selector()
+    on_changeset = on_cs,
+    should_stop = function() {
+      pump_ipc()
+      !isTRUE(running)
     },
-    until_first_payload = FALSE
+    until_first_payload = until_first_payload
   )
   last_sync_at <<- proc.time()[["elapsed"]]
   if (isTRUE(result$fallback_to_fdv1)) {
@@ -132,22 +163,29 @@ do_stream <- function() {
     return(result)
   }
   # Permanent primary removal (401/403): switch to fallback stream if configured
-  if (!isTRUE(result$ok) && !is.null(result$status) && result$status %in% c(401L, 403L)) {
+  status_code <- result$status
+  if (is.null(status_code) && grepl("HTTP (401|403)", result$error %||% "")) {
+    status_code <- as.integer(sub(".*HTTP ([0-9]+).*", "\\1", result$error))
+  }
+  if (!isTRUE(result$ok) && !is.null(status_code) && status_code %in% c(401L, 403L)) {
     fb <- config$fallback_stream_uri
+    emit_log("info", sprintf(
+      "Primary stream status=%s fallback=%s err=%s",
+      status_code, fb %||% "NULL", result$error %||% ""
+    ))
     if (!is.null(fb) && nzchar(fb)) {
       emit_log("info", "Primary stream permanently failed; switching to secondary")
+      # Must <<- — `config$x <-` inside a function only mutates a local copy.
       config$stream_uri <<- fb
       config$fallback_stream_uri <<- NULL
       result <- fdv2_stream_once(
         config, selector,
-        on_changeset = function(cs) {
-          apply_ok_changeset(list(ok = TRUE, changeset = cs))
-          selector <<- store$selector()
-        },
-        until_first_payload = FALSE
+        on_changeset = on_cs,
+        until_first_payload = until_first_payload
       )
       last_sync_at <<- proc.time()[["elapsed"]]
       if (isTRUE(result$ok)) return(result)
+      emit_log("warn", sprintf("Secondary stream failed: %s", result$error %||% "unknown"))
     }
   }
   if (!isTRUE(result$ok)) {
@@ -180,36 +218,48 @@ handle_start <- function(payload) {
     return(invisible(NULL))
   }
 
-  # Initializer: poll when a polling base URI is available; otherwise stream-only.
-  has_poll_init <- !is.null(config$base_uri) && nzchar(config$base_uri) &&
-    !isTRUE(config$stream_only)
-  # Heuristic: if stream is enabled and no explicit poll initializer was wired
-  # (sync_poll_uri unset and stream_uri differs from default poll base), prefer
-  # streaming for first contact when stream_only is set by the contract service.
+  # Initializer path: poll every configured polling initializer in order, then
+  # (optionally) stream/poll the primary synchronizer once so Ready can fire.
+  result <- list(ok = FALSE)
+  init_uris <- unlist(config$poll_init_uris %||% list(), use.names = FALSE)
+  if (length(init_uris) == 0L &&
+      !isTRUE(config$stream_only) &&
+      !is.null(config$base_uri) && nzchar(config$base_uri)) {
+    init_uris <- config$base_uri
+  }
+
   if (isTRUE(config$stream_only) || (isTRUE(use_stream) && isTRUE(config$skip_poll_init))) {
-    result <- do_stream()
+    result <- do_stream(until_first_payload = TRUE)
   } else {
-    result <- do_poll(use_sync_uri = FALSE)
+    for (uri in init_uris) {
+      result <- fdv2_poll_once(config, selector, base_uri = uri)
+      last_sync_at <<- proc.time()[["elapsed"]]
+      if (isTRUE(result$fallback_to_fdv1)) {
+        handle_fdv1_fallback()
+        emit("Ready", list(fail_safe = TRUE))
+        return(invisible(NULL))
+      }
+      if (isTRUE(result$ok)) apply_ok_changeset(result)
+    }
+    # After initializers, contact the synchronizer once before Ready so harness
+    # suites that assert on the sync endpoint immediately after construction pass.
+    if (isTRUE(use_stream)) {
+      result <- do_stream(until_first_payload = TRUE)
+    } else if (!is.null(config$sync_poll_uri) && nzchar(config$sync_poll_uri)) {
+      result <- do_poll(use_sync_uri = TRUE)
+    } else if (length(init_uris) == 0L) {
+      result <- do_poll(use_sync_uri = FALSE)
+    }
   }
   if (identical(status, "off")) {
     emit("Ready", list(fail_safe = TRUE))
     return(invisible(NULL))
   }
-  # If a distinct polling synchronizer URI is configured, hit it immediately
-  # so harness tag/header assertions on the synchronizer endpoint succeed.
-  if (!isTRUE(use_stream) &&
-      !is.null(config$sync_poll_uri) && nzchar(config$sync_poll_uri) &&
-      !identical(config$sync_poll_uri, config$base_uri)) {
-    result <- do_poll(use_sync_uri = TRUE)
-  }
-  # Allow the main loop to contact the synchronizer immediately (tags / header
-  # suites await the synchronizer endpoint right after client construction).
+  # Allow the main loop to reconnect/poll immediately after Ready.
   last_sync_at <<- -Inf
-  if (!isTRUE(result$ok)) {
-    emit("Ready", list(initialized = FALSE))
-  } else {
-    emit("Ready", list(initialized = TRUE))
-  }
+  initialized <- isTRUE(result$ok) || isTRUE(store$is_initialized()) ||
+    identical(status, "valid")
+  emit("Ready", list(initialized = initialized))
   invisible(NULL)
 }
 
@@ -256,9 +306,10 @@ while (isTRUE(running)) {
   now <- proc.time()[["elapsed"]]
   if (isTRUE(started) && !isTRUE(config$offline) && !identical(status, "off")) {
     if (identical(sync_mode, "stream")) {
-      # Attempt stream; on failure fall back to polling after thresholds
+      # Attempt stream; on failure fall back to polling after thresholds.
+      # Keep the connection open for multi-payload FDv2 suites.
       if ((now - last_sync_at) >= reconnect_delay) {
-        res <- do_stream()
+        res <- do_stream(until_first_payload = FALSE)
         if (!isTRUE(res$ok) && !identical(status, "off")) {
           # Fallback to polling synchronizer
           sync_mode <<- "poll"
