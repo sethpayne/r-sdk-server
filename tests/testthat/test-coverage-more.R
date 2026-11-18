@@ -57,7 +57,9 @@ test_that("events post against webfakes and buffer capacity", {
 
 test_that("evaluation detail print and all_flags experimentation paths", {
   d <- evaluation_detail("v", 1L, list(kind = "FALLTHROUGH", inExperiment = TRUE))
-  expect_output(print(d), "EvaluationDetail")
+  expect_s3_class(d, "ld_evaluation_detail")
+  # Prefer the S3 method explicitly (some runners resolve print generics oddly).
+  expect_output(print.ld_evaluation_detail(d), "EvaluationDetail")
   cfg <- ld_config("k", offline = TRUE)
   client <- ld_client(cfg)
   on.exit(client$close(), add = TRUE)

@@ -40,12 +40,24 @@ Per project direction: implement using Python SDK + specs as source of truth.
 | D21 | Migrations suites **omitted/suppressed**; migrations stay out | FEATURES out of scope |
 | D22 | Context builder method is **`mark_private()`** (R6 reserves `private`) | R deviation from Python `.private()`; harness maps field `private` → `mark_private` |
 | D23 | Context is immutable **S3** (`ld_context`); builders are **R6** | Matches Python immutability without R6 copy traps |
+| D24 | **covr DoD gate** measures evaluator / context / data_system / event_processor only; **excludes** `R/process-worker.R` and `inst/worker/` | callr child processes load the package out-of-band; covr cannot attribute their lines (`Can't find coverage from N R processes`). Parent-side FDv2 poll/stream, store, events, evaluator, and context are covered offline (≥90%). Worker behavior is still exercised by sdk-test-harness + soak, not by a soft coverage gate. |
 
 ---
 
 ## Open questions (non-blocking)
 
 None that block M2–M10. Official SDK name / user-agent remains pending LaunchDarkly assignment.
+
+### Coverage exclusion detail (D24)
+
+| Included in ≥90% gate | Excluded (justified) |
+|----------------------|----------------------|
+| `evaluator.R`, `operators.R`, `evaluation.R` | `process-worker.R` |
+| `context.R` | `inst/worker/run.R` |
+| `store.R`, `fdv2-changeset.R`, `fdv2-polling.R`, `fdv2-streaming.R` | |
+| `events.R` | |
+
+Streaming/polling HTTP paths are unit-tested against **local** webfakes/httpuv/Python loopback servers (no live LaunchDarkly network).
 
 ---
 

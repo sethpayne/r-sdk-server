@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
 # Coverage gate for v1 DoD: ≥90% on evaluator, context, data system (store/FDv2), events.
-# Unit tests use offline mode / webfakes only (no live network).
+# Unit tests use offline mode / webfakes / local loopback SSE only (no live LD network).
+# Intentionally excludes process-worker.R + inst/worker (NOTES.md D24 — callr IPC).
 
 suppressPackageStartupMessages({
   library(covr)
@@ -59,11 +60,10 @@ if (length(failures)) {
   print(sort(by_file))
   cat("\nCoverage gate FAILED:\n")
   cat(paste(" -", failures), sep = "\n")
-  if (identical(Sys.getenv("LD_COVERAGE_SOFT", unset = ""), "1")) {
-    cat("\nLD_COVERAGE_SOFT=1 — reporting failure but exiting 0 (worker IPC coverage invisible to covr).\n")
-    quit(status = 0)
-  }
+  cat("\nNote: process-worker.R / inst/worker are intentionally outside this gate\n")
+  cat("(callr child IPC is invisible to covr; see NOTES.md D24).\n")
   quit(status = 1)
 }
 
 cat("\nCoverage gate PASSED (≥90% on evaluator/context/data_system/event_processor).\n")
+cat("Excluded from gate (documented in NOTES.md D24): process-worker.R, inst/worker/.\n")

@@ -21,6 +21,8 @@ All notable changes to this unofficial project are documented here.
 - Polling initializers (ordered), stream-only init, 401/403 → secondary stream (`<<-` config fix)
 - Streaming: discard in-flight payload on `error` event; trust change-set over model versions; IPC pump during long-lived stream
 - Evaluator: legacy attribute refs, MALFORMED_FLAG for bad refs/cycles, RFC3339 dates, semver prerelease, bucketing scale
-- GitHub Actions R CMD check matrix (OS × release/devel/oldrel) + soft covr gate
+- Offline unit coverage ≥90% on evaluator / context / data_system / events; hard covr gate (no soft pass)
+- Documented exclusion: `process-worker.R` / `inst/worker` (callr IPC invisible to covr; NOTES D24)
+- GitHub Actions R CMD check matrix (OS × release/devel/oldrel) + hard covr gate
 - CI soak (`scripts/soak-ci.R`) + documented 24h soak (`scripts/soak-24h.R`)
 - R CMD check `--as-cran`: 0 errors / 0 warnings (2 environmental notes)

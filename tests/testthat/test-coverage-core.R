@@ -8,7 +8,7 @@ test_that("operators cover date, semver, numeric, string, and match ops", {
   expect_true(launchdarklyServer:::.ld_op_ends_with("abcdef", "def"))
   expect_true(launchdarklyServer:::.ld_op_contains("abcdef", "cd"))
   expect_true(launchdarklyServer:::.ld_op_matches("abc123", "^abc"))
-  expect_false(launchdarklyServer:::.ld_op_matches("abc", "[")) # invalid regex
+  expect_false(suppressWarnings(launchdarklyServer:::.ld_op_matches("abc", "["))) # invalid regex
   expect_true(launchdarklyServer:::.ld_op_lt(1, 2))
   expect_true(launchdarklyServer:::.ld_op_lte(2, 2))
   expect_true(launchdarklyServer:::.ld_op_gt(3, 2))
