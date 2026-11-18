@@ -1,0 +1,8 @@
+# Milestone 1 stub. Prefer roxygen-generated NAMESPACE in later milestones.
+
+export(LD_GITHUB_REPO)
+export(LD_R_PACKAGE)
+export(LD_SDK_NAME)
+export(LD_SDK_VERSION)
+export(LD_USER_AGENT)
+export(LD_GITHUB_REMOTE_HINT)
