@@ -7,9 +7,18 @@ NULL
   is.numeric(x) && !is.logical(x) && length(x) == 1L && !is.na(x)
 }
 
+# JSON numbers arrive from jsonlite as integer or double depending on their text
+# ("30" vs "30.0"), while R users usually write doubles; compare numerically.
 .ld_op_in <- function(ctx, clause, prep = NULL) {
+  if (.ld_is_number(ctx) && .ld_is_number(clause)) {
+    return(as.numeric(ctx) == as.numeric(clause))
+  }
   if (is.logical(ctx) != is.logical(clause)) return(FALSE)
-  identical(ctx, clause)
+  if (is.character(ctx) && is.character(clause)) {
+    return(length(ctx) == 1L && length(clause) == 1L && !is.na(ctx) && !is.na(clause) &&
+      ctx == clause)
+  }
+  identical(unname(ctx), unname(clause))
 }
 
 .ld_op_starts_with <- function(ctx, clause, prep = NULL) {

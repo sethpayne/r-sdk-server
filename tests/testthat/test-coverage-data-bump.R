@@ -155,5 +155,5 @@ test_that("fdv2_stream_once covers curl fail and fdv1 fallback header on 200", {
     list(sdk_key = "k", stream_uri = sub("/$", "", p$url()), connect_timeout = 2, read_timeout = 3),
     until_first_payload = TRUE
   )
-  expect_true(isTRUE(res_fb$fallback_to_fdv1) || grepl("fdv1|fallback", res_fb$error %||% "", ignore.case = TRUE))
+  expect_true(res_fb$fallback_to_fdv1)
 })

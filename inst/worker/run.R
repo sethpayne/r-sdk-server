@@ -65,6 +65,8 @@ started <- FALSE
 use_stream <- TRUE
 seconds_valid <- 0
 sync_mode <- "stream" # stream | poll
+events_disabled <- FALSE
+last_context_keys_reset <- proc.time()[["elapsed"]]
 
 handle_fdv1_fallback <- function() {
   emit_log("warn", "FDv1 fallback requested by server; unsupported — fail-safe", "fdv1Fallback")
@@ -108,36 +110,78 @@ do_poll <- function(use_sync_uri = FALSE) {
         return(result2)
       }
     }
+    # 401/403: the SDK key is rejected; retrying cannot succeed.
+    if (!is.null(result$status) && result$status %in% c(401L, 403L)) {
+      emit_log("error", sprintf(
+        "Polling received HTTP %s; SDK key rejected, stopping data source", result$status
+      ), "unrecoverable")
+      status <<- "off"
+      emit("Status", list(state = status, error = result$error))
+    }
     return(result)
   }
   apply_ok_changeset(result)
   result
 }
 
-pump_ipc <- function() {
-  # Drain stdin while a long-lived stream is open so Flush/Track/Shutdown still work.
+handle_message <- function(msg) {
+  type <- msg$type
+  if (identical(type, "Start")) {
+    started_ok <- tryCatch({
+      handle_start(msg$payload)
+      TRUE
+    }, error = function(e) {
+      emit_log("error", paste("Worker start failed:", conditionMessage(e)), "startError")
+      FALSE
+    })
+    if (!isTRUE(started_ok)) {
+      status <<- "interrupted"
+      emit("Status", list(state = status, error = "start failed"))
+      emit("Ready", list(initialized = isTRUE(store$is_initialized())))
+      last_sync_at <<- -Inf
+    }
+  } else if (identical(type, "Shutdown")) {
+    flush_events()
+    running <<- FALSE
+  } else if (identical(type, "Ping")) {
+    emit("Pong", list(), id = msg$id)
+  } else if (identical(type, "Flush")) {
+    flush_events()
+  } else if (identical(type, "Track")) {
+    if (!is.null(buffer) && !events_disabled) {
+      p <- msg$payload
+      buffer$process_custom(p$event_name, p$context, p$data, p$metric_value,
+                            creation_date = p$creation_date)
+    }
+  } else if (identical(type, "Identify")) {
+    if (!is.null(buffer) && !events_disabled) {
+      buffer$process_identify(msg$payload$context, creation_date = msg$payload$creation_date)
+    }
+  } else if (identical(type, "Events")) {
+    if (!is.null(buffer) && !events_disabled) {
+      for (rec in msg$payload$events %||% list()) buffer$process_eval(rec)
+    }
+  }
+  invisible(NULL)
+}
+
+read_ipc <- function() {
   repeat {
     line <- tryCatch(readLines(stdin_con, n = 1L, warn = FALSE), error = function(e) character())
     if (length(line) == 0L) break
     msg <- tryCatch(jsonlite::fromJSON(line, simplifyVector = FALSE), error = function(e) NULL)
-    if (is.null(msg) || is.null(msg$type)) next
-    type <- msg$type
-    if (identical(type, "Shutdown")) {
-      flush_events()
-      running <<- FALSE
-    } else if (identical(type, "Ping")) {
-      emit("Pong", list(), id = msg$id)
-    } else if (identical(type, "Flush")) {
-      flush_events()
-    } else if (identical(type, "Track")) {
-      if (!is.null(buffer)) {
-        buffer$add_custom(msg$payload$event_name, msg$payload$context, msg$payload$data, msg$payload$metric_value)
-      }
-    } else if (identical(type, "Identify")) {
-      if (!is.null(buffer)) buffer$add_identify(msg$payload$context)
-    }
+    if (is.null(msg) || !is.list(msg) || is.null(names(msg)) || is.null(msg$type)) next
+    tryCatch(handle_message(msg), error = function(e) {
+      emit_log("error", paste("Worker failed to handle", msg$type, "message:", conditionMessage(e)))
+    })
+    if (!isTRUE(running)) break
   }
   invisible(NULL)
+}
+
+pump_ipc <- function() {
+  # Drain stdin while a long-lived stream is open so Flush/Track/Shutdown still work.
+  read_ipc()
 }
 
 do_stream <- function(until_first_payload = TRUE) {
@@ -206,7 +250,9 @@ handle_start <- function(payload) {
   buffer <<- EventBuffer$new(
     capacity = config$events_capacity %||% 10000L,
     all_private = isTRUE(config$all_attributes_private),
-    private_attrs = unlist(config$private_attributes %||% list(), use.names = FALSE)
+    private_attrs = unlist(config$private_attributes %||% list(), use.names = FALSE),
+    context_keys_capacity = config$context_keys_capacity %||% 1000L,
+    omit_anonymous_contexts = isTRUE(config$omit_anonymous_contexts)
   )
   started <<- TRUE
 
@@ -264,44 +310,27 @@ handle_start <- function(payload) {
 }
 
 flush_events <- function() {
-  if (is.null(buffer) || !isTRUE(config$send_events)) {
+  if (is.null(buffer) || !isTRUE(config$send_events) || events_disabled) {
     emit("EventsAck", list(flushed = TRUE, count = 0))
     return()
   }
-  ev <- buffer$drain()
+  ev <- buffer$payload()
   res <- ld_post_events(config, ev)
+  if (!is.null(res$server_time)) buffer$set_server_time(res$server_time)
+  if (isTRUE(res$unrecoverable)) {
+    events_disabled <<- TRUE
+    emit_log("error", sprintf("Event delivery received %s; analytics events disabled",
+                              res$error %||% "an unrecoverable error"), "eventsDisabled")
+  }
   emit("EventsAck", list(flushed = isTRUE(res$ok), count = length(ev), error = res$error))
 }
 
 stdin_con <- file("stdin", open = "r", blocking = FALSE)
 last_flush_at <- proc.time()[["elapsed"]]
 
-while (isTRUE(running)) {
-  repeat {
-    line <- tryCatch(readLines(stdin_con, n = 1L, warn = FALSE), error = function(e) character())
-    if (length(line) == 0L) break
-    msg <- tryCatch(jsonlite::fromJSON(line, simplifyVector = FALSE), error = function(e) NULL)
-    if (is.null(msg) || is.null(msg$type)) next
-    type <- msg$type
-    if (identical(type, "Start")) {
-      handle_start(msg$payload)
-    } else if (identical(type, "Shutdown")) {
-      flush_events()
-      running <- FALSE
-      break
-    } else if (identical(type, "Ping")) {
-      emit("Pong", list(), id = msg$id)
-    } else if (identical(type, "Flush")) {
-      flush_events()
-    } else if (identical(type, "Track")) {
-      if (!is.null(buffer)) {
-        buffer$add_custom(msg$payload$event_name, msg$payload$context, msg$payload$data, msg$payload$metric_value)
-      }
-    } else if (identical(type, "Identify")) {
-      if (!is.null(buffer)) buffer$add_identify(msg$payload$context)
-    }
-  }
-  if (!isTRUE(running)) break
+worker_step <- function() {
+  read_ipc()
+  if (!isTRUE(running)) return(invisible(NULL))
 
   now <- proc.time()[["elapsed"]]
   if (isTRUE(started) && !isTRUE(config$offline) && !identical(status, "off")) {
@@ -334,10 +363,29 @@ while (isTRUE(running)) {
 
   flush_iv <- as.numeric(config$flush_interval %||% 5)
   if (isTRUE(started) && isTRUE(config$send_events) && (now - last_flush_at) >= flush_iv) {
+    last_flush_at <<- now
     flush_events()
-    last_flush_at <- now
   }
+  keys_iv <- as.numeric(config$context_keys_flush_interval %||% 300)
+  if (!is.null(buffer) && (now - last_context_keys_reset) >= keys_iv) {
+    buffer$reset_context_keys()
+    last_context_keys_reset <<- now
+  }
+  invisible(NULL)
+}
 
+# A failure in one iteration (unexpected payload shape, transient I/O error)
+# must not end the worker: log it, mark the data source interrupted, back off.
+while (isTRUE(running)) {
+  tryCatch(worker_step(), error = function(e) {
+    emit_log("error", paste("Worker iteration failed:", conditionMessage(e)), "workerError")
+    if (!identical(status, "off")) {
+      status <<- "interrupted"
+      emit("Status", list(state = status, error = conditionMessage(e)))
+    }
+    last_sync_at <<- proc.time()[["elapsed"]]
+  })
+  if (!isTRUE(running)) break
   Sys.sleep(0.05)
 }
 

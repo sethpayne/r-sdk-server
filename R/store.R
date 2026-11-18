@@ -23,6 +23,7 @@ FeatureStore <- R6::R6Class(
     },
 
     get_flag = function(key) {
+      if (!.ld_valid_key(key)) return(NULL)
       if (exists(key, envir = private$flags_, inherits = FALSE)) {
         get(key, envir = private$flags_, inherits = FALSE)
       } else {
@@ -31,6 +32,7 @@ FeatureStore <- R6::R6Class(
     },
 
     get_segment = function(key) {
+      if (!.ld_valid_key(key)) return(NULL)
       if (exists(key, envir = private$segments_, inherits = FALSE)) {
         get(key, envir = private$segments_, inherits = FALSE)
       } else {
@@ -52,7 +54,7 @@ FeatureStore <- R6::R6Class(
 
     upsert = function(kind, key, version, object, force = FALSE) {
       env <- private$env_for(kind)
-      if (is.null(env)) return(invisible(FALSE))
+      if (is.null(env) || !.ld_valid_key(key)) return(invisible(FALSE))
       obj <- object
       if (is.character(obj) && length(obj) == 1L && nzchar(obj)) {
         obj <- tryCatch(jsonlite::fromJSON(obj, simplifyVector = FALSE), error = function(e) NULL)
@@ -65,9 +67,11 @@ FeatureStore <- R6::R6Class(
       obj_ver <- obj$version %||% version
       if (!isTRUE(force) && exists(key, envir = env, inherits = FALSE)) {
         cur <- get(key, envir = env, inherits = FALSE)
-        cur_ver <- cur$version %||% -1L
-        if (!is.null(cur_ver) && as.integer(obj_ver) < as.integer(cur_ver) &&
-            as.integer(version) < as.integer(cur_ver)) {
+        cur_ver <- suppressWarnings(as.integer(cur$version %||% -1L))
+        ov <- suppressWarnings(as.integer(obj_ver %||% NA_integer_))
+        ev <- suppressWarnings(as.integer(version %||% NA_integer_))
+        if (length(cur_ver) == 1L && length(ov) == 1L && length(ev) == 1L &&
+            !is.na(cur_ver) && !is.na(ov) && !is.na(ev) && ov < cur_ver && ev < cur_ver) {
           return(invisible(FALSE))
         }
       }
@@ -79,11 +83,13 @@ FeatureStore <- R6::R6Class(
 
     delete = function(kind, key, version) {
       env <- private$env_for(kind)
-      if (is.null(env)) return(invisible(FALSE))
+      if (is.null(env) || !.ld_valid_key(key)) return(invisible(FALSE))
+      version <- suppressWarnings(as.integer(version %||% NA_integer_))
+      if (length(version) != 1L) version <- NA_integer_
       if (exists(key, envir = env, inherits = FALSE)) {
         cur <- get(key, envir = env, inherits = FALSE)
         cur_ver <- cur$version %||% -1L
-        if (!is.null(cur_ver) && as.integer(version) < as.integer(cur_ver)) {
+        if (!is.na(version) && !is.null(cur_ver) && version < as.integer(cur_ver)) {
           return(invisible(FALSE))
         }
       }
@@ -97,9 +103,11 @@ FeatureStore <- R6::R6Class(
       private$flags_ <- new.env(parent = emptyenv(), hash = TRUE)
       private$segments_ <- new.env(parent = emptyenv(), hash = TRUE)
       for (nm in names(flags)) {
+        if (!.ld_valid_key(nm)) next
         assign(nm, flags[[nm]], envir = private$flags_)
       }
       for (nm in names(segments)) {
+        if (!.ld_valid_key(nm)) next
         assign(nm, segments[[nm]], envir = private$segments_)
       }
       if (!is.null(selector)) {

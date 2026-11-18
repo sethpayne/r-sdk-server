@@ -20,6 +20,9 @@ LD_INTENT_TRANSFER_NONE <- "xfer-none"
 #'   or a list with `$error`.
 #' @keywords internal
 fdv2_polling_payload_to_changeset <- function(data) {
+  if (!is.list(data) || is.null(names(data))) {
+    return(list(error = "Invalid payload: expected a JSON object"))
+  }
   if (is.null(data$events) || !is.list(data$events)) {
     return(list(error = "Invalid payload: 'events' key is missing or not a list"))
   }
@@ -32,24 +35,35 @@ fdv2_polling_payload_to_changeset <- function(data) {
     if (!is.list(event) || is.null(event$event)) next
     ev <- event$event
 
+    if (!is.character(ev) || length(ev) != 1L) next
     if (identical(ev, LD_EVENT_SERVER_INTENT)) {
       # Wire format: { payloads: [ { intentCode, id, target, reason } ] }
+      if (!is.null(event$data) && (!is.list(event$data) || is.null(names(event$data)))) {
+        return(list(error = "Invalid payload: 'server-intent' data must be an object"))
+      }
       payloads <- event$data$payloads
       code <- NULL
-      if (is.list(payloads) && length(payloads) >= 1L) {
+      if (is.list(payloads) && length(payloads) >= 1L && is.list(payloads[[1]])) {
         code <- payloads[[1]]$intentCode %||% payloads[[1]]$code
       }
-      code <- code %||% event$data$payload$code %||% event$data$code
+      if (is.null(code) && is.list(event$data$payload)) code <- event$data$payload$code
+      code <- code %||% event$data$code
+      if (!is.null(code) && !(is.character(code) && length(code) == 1L)) {
+        return(list(error = "Invalid payload: 'server-intent' intent code must be a string"))
+      }
       if (identical(code, LD_INTENT_TRANSFER_NONE)) {
         return(list(no_changes = TRUE))
       }
       intent <- code %||% LD_INTENT_TRANSFER_FULL
     } else if (identical(ev, LD_EVENT_PUT_OBJECT)) {
       ed <- event$data
-      if (!is.list(ed) || !is.character(ed$kind)) {
+      if (!is.list(ed) || is.null(names(ed)) || !is.character(ed$kind) || length(ed$kind) != 1L) {
         return(list(error = "Invalid payload: 'put-object' data must be an object"))
       }
       if (!ed$kind %in% .ld_supported_kinds) next
+      if (!.ld_valid_key(ed$key)) {
+        return(list(error = "Invalid payload: 'put-object' requires a string key"))
+      }
       obj <- ed$object
       # json.RawMessage may arrive as a JSON string — parse before upsert.
       if (is.character(obj) && length(obj) == 1L && nzchar(obj)) {
@@ -63,10 +77,13 @@ fdv2_polling_payload_to_changeset <- function(data) {
       )
     } else if (identical(ev, LD_EVENT_DELETE_OBJECT)) {
       ed <- event$data
-      if (!is.list(ed) || !is.character(ed$kind)) {
+      if (!is.list(ed) || is.null(names(ed)) || !is.character(ed$kind) || length(ed$kind) != 1L) {
         return(list(error = "Invalid payload: 'delete-object' data must be an object"))
       }
       if (!ed$kind %in% .ld_supported_kinds) next
+      if (!.ld_valid_key(ed$key)) {
+        return(list(error = "Invalid payload: 'delete-object' requires a string key"))
+      }
       deletes[[length(deletes) + 1L]] <- list(
         kind = ed$kind,
         key = ed$key,
@@ -74,7 +91,7 @@ fdv2_polling_payload_to_changeset <- function(data) {
       )
     } else if (identical(ev, LD_EVENT_PAYLOAD_TRANSFERRED)) {
       sel <- event$data
-      if (is.null(sel$state) || is.null(sel$version)) {
+      if (!is.list(sel) || is.null(names(sel)) || is.null(sel$state) || is.null(sel$version)) {
         return(list(error = "Invalid JSON in payload transferred object"))
       }
       # Streaming deltas without a fresh server-intent are changes, not full replaces.

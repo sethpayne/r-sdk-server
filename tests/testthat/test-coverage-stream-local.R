@@ -74,7 +74,7 @@ test_that("fdv2_stream_once covers ok/multi/goodbye/error/badjson/401/403", {
     until_first_payload = TRUE
   )
   expect_false(isTRUE(res6$ok))
-  expect_true(identical(res6$status, 401L) || grepl("401", res6$error %||% "", fixed = FALSE))
+  expect_match(res6$error, "HTTP 401", fixed = TRUE)
   s6$stop()
 
   # 403 + fdv1 fallback header
@@ -84,7 +84,7 @@ test_that("fdv2_stream_once covers ok/multi/goodbye/error/badjson/401/403", {
     list(sdk_key = "k", stream_uri = s7$url, read_timeout = 3, connect_timeout = 2),
     until_first_payload = TRUE
   )
-  expect_true(isTRUE(res7$fallback_to_fdv1) || grepl("403|fdv1|HTTP", res7$error %||% "", fixed = FALSE))
+  expect_true(res7$fallback_to_fdv1)
   s7$stop()
 })
 

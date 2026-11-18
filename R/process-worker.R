@@ -52,13 +52,41 @@ ProcessWorker <- R6::R6Class(
       msg <- list(v = 1L, type = type, payload = payload)
       if (!is.null(id)) msg$id <- id
       line <- paste0(jsonlite::toJSON(msg, auto_unbox = TRUE, null = "null", digits = NA), "\n")
-      private$proc_$write_input(line)
+      bytes <- charToRaw(enc2utf8(line))
+      if (length(private$pending_) + length(bytes) > private$max_pending_) {
+        # Worker is not reading stdin (e.g. blocked in a slow request); drop
+        # rather than grow without bound.
+        private$dropped_ <- private$dropped_ + 1L
+        if (!isTRUE(private$drop_warned_)) {
+          warning("LaunchDarkly worker IPC buffer full; dropping messages", call. = FALSE)
+          private$drop_warned_ <- TRUE
+        }
+        return(invisible(self))
+      }
+      private$pending_ <- c(private$pending_, bytes)
+      self$flush_input()
       invisible(self)
     },
+
+    #' Write buffered IPC bytes; the stdin pipe is non-blocking, so a full
+    #' pipe leaves the remainder queued for the next call.
+    flush_input = function() {
+      if (!length(private$pending_) || !self$is_alive()) return(invisible(0L))
+      left <- tryCatch(private$proc_$write_input(private$pending_), error = function(e) private$pending_)
+      private$pending_ <- if (is.raw(left)) left else raw(0)
+      invisible(length(private$pending_))
+    },
+
+    pending_bytes = function() length(private$pending_),
+
+    dropped_messages = function() private$dropped_,
+
+    pid = function() if (is.null(private$proc_)) NA_integer_ else private$proc_$get_pid(),
 
     #' Read and dispatch available stdout lines.
     drain = function(timeout_ms = 0) {
       if (!self$is_alive()) return(invisible(list()))
+      self$flush_input()
       out <- private$proc_$read_output_lines()
       msgs <- list()
       for (line in out) {
@@ -97,7 +125,13 @@ ProcessWorker <- R6::R6Class(
         return(invisible(NULL))
       }
       try(self$send("Shutdown"), silent = TRUE)
-      private$proc_$wait(timeout = as.integer(timeout_s * 1000))
+      deadline <- Sys.time() + timeout_s
+      while (length(private$pending_) && self$is_alive() && Sys.time() < deadline) {
+        self$flush_input()
+        if (length(private$pending_)) Sys.sleep(0.02)
+      }
+      remaining <- max(0, as.numeric(difftime(deadline, Sys.time(), units = "secs")))
+      private$proc_$wait(timeout = as.integer(remaining * 1000))
       if (private$proc_$is_alive()) {
         private$proc_$kill(close_connections = TRUE)
       }
@@ -107,6 +141,10 @@ ProcessWorker <- R6::R6Class(
   ),
   private = list(
     proc_ = NULL,
+    pending_ = raw(0),
+    max_pending_ = 16 * 1024^2,
+    dropped_ = 0L,
+    drop_warned_ = FALSE,
     on_message_ = NULL,
     started_ = FALSE,
     pkg_path = function() {
