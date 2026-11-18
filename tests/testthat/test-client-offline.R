@@ -39,7 +39,9 @@ test_that("webfakes polling initializes client store", {
   app <- webfakes::new_app()
   app$get("/sdk/poll", function(req, res) {
     body <- list(events = list(
-      list(event = "server-intent", data = list(payload = list(code = "xfer-full"))),
+      list(event = "server-intent", data = list(
+        payloads = list(list(intentCode = "xfer-full", id = "p", target = 1, reason = "initial"))
+      )),
       list(event = "put-object", data = list(
         kind = "flag", key = "poll-flag", version = 1,
         object = list(
@@ -55,6 +57,25 @@ test_that("webfakes polling initializes client store", {
   })
   server <- webfakes::new_app_process(app)
   on.exit(server$stop(), add = TRUE)
+
+  # Wait until the mock is actually accepting connections (avoids startup races
+  # under R CMD check where the worker can poll before httpuv is ready).
+  ready <- FALSE
+  deadline <- Sys.time() + 5
+  while (Sys.time() < deadline) {
+    ok <- tryCatch({
+      resp <- httr2::req_perform(
+        httr2::request(paste0(sub("/$", "", server$url()), "/sdk/poll"))
+      )
+      httr2::resp_status(resp) == 200
+    }, error = function(e) FALSE)
+    if (isTRUE(ok)) {
+      ready <- TRUE
+      break
+    }
+    Sys.sleep(0.05)
+  }
+  skip_if_not(ready, "webfakes poll mock did not become ready")
 
   cfg <- ld_config(
     "test-sdk-key",

@@ -33,7 +33,13 @@ fdv2_polling_payload_to_changeset <- function(data) {
     ev <- event$event
 
     if (identical(ev, LD_EVENT_SERVER_INTENT)) {
-      code <- event$data$payload$code %||% event$data$code
+      # Wire format: { payloads: [ { intentCode, id, target, reason } ] }
+      payloads <- event$data$payloads
+      code <- NULL
+      if (is.list(payloads) && length(payloads) >= 1L) {
+        code <- payloads[[1]]$intentCode %||% payloads[[1]]$code
+      }
+      code <- code %||% event$data$payload$code %||% event$data$code
       if (identical(code, LD_INTENT_TRANSFER_NONE)) {
         return(list(no_changes = TRUE))
       }
@@ -44,11 +50,16 @@ fdv2_polling_payload_to_changeset <- function(data) {
         return(list(error = "Invalid payload: 'put-object' data must be an object"))
       }
       if (!ed$kind %in% .ld_supported_kinds) next
+      obj <- ed$object
+      # json.RawMessage may arrive as a JSON string — parse before upsert.
+      if (is.character(obj) && length(obj) == 1L && nzchar(obj)) {
+        obj <- tryCatch(jsonlite::fromJSON(obj, simplifyVector = FALSE), error = function(e) obj)
+      }
       puts[[length(puts) + 1L]] <- list(
         kind = ed$kind,
         key = ed$key,
         version = ed$version,
-        object = ed$object
+        object = obj
       )
     } else if (identical(ev, LD_EVENT_DELETE_OBJECT)) {
       ed <- event$data
@@ -66,8 +77,9 @@ fdv2_polling_payload_to_changeset <- function(data) {
       if (is.null(sel$state) || is.null(sel$version)) {
         return(list(error = "Invalid JSON in payload transferred object"))
       }
+      # Streaming deltas without a fresh server-intent are changes, not full replaces.
       return(list(
-        intent = intent %||% LD_INTENT_TRANSFER_FULL,
+        intent = intent %||% LD_INTENT_TRANSFER_CHANGES,
         puts = puts,
         deletes = deletes,
         selector = list(state = as.character(sel$state), version = as.integer(sel$version))

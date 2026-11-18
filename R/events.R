@@ -161,10 +161,15 @@ ld_post_events <- function(config, events) {
       `X-LaunchDarkly-Event-Schema` = "4"
     ) |>
     httr2::req_body_raw(
-      charToRaw(jsonlite::toJSON(events, auto_unbox = TRUE, null = "null")),
+      charToRaw(jsonlite::toJSON(events, auto_unbox = TRUE, null = "null", digits = NA)),
       "application/json"
     ) |>
     httr2::req_timeout(config$read_timeout %||% 15)
+
+  tags <- .ld_tags_header_value(config)
+  if (!is.null(tags)) {
+    req <- httr2::req_headers(req, `X-LaunchDarkly-Tags` = tags)
+  }
 
   resp <- tryCatch(httr2::req_perform(req), error = function(e) e)
   if (inherits(resp, "error")) {

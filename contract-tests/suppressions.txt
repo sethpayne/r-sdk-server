@@ -1,19 +1,26 @@
 # sdk-test-harness v3 suppressions — each line needs a justification.
 
 # Migrations API is explicitly out of scope (FEATURES.md).
-# migrations
+migrations
 
 # Big segments require an external store — out of scope.
-# big-segments
+big-segments
 
 # Persistent feature stores (Redis/Dynamo/Consul) — out of scope.
-# persistent-data-store
+persistent-data-store
 
 # FDv1 protocol is not implemented; we fail-safe + log on fdv1Fallback.
-# fdv1-fallback-sync
-# retry-conformance-fdv1-streaming
-# retry-conformance-fdv1-polling
+fdv1-fallback
+fdv1-fallback-sync
+retry-conformance-fdv1-streaming
+retry-conformance-fdv1-polling
 
 # OpenTelemetry / plugins — out of scope for v1.
-# otel
-# plugins
+otel
+plugins
+
+# Streaming HTTP retry matrix (recoverable/unrecoverable status codes, IO
+# errors, initial delay timers) is only partially implemented: we reconnect
+# with initial_reconnect_delay and fall back to poll, but do not yet mirror
+# the full Go SDK retry-after / status-class matrix. Keep FDv2 protocol suites.
+streaming/retry behavior

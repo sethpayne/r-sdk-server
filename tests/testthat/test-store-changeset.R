@@ -28,7 +28,9 @@ test_that("changeset put/delete and full transfer", {
 
 test_that("polling payload parser handles xfer-full events", {
   payload <- list(events = list(
-    list(event = "server-intent", data = list(payload = list(code = "xfer-full"))),
+    list(event = "server-intent", data = list(
+      payloads = list(list(intentCode = "xfer-full", id = "p", target = 1, reason = "initial"))
+    )),
     list(event = "put-object", data = list(
       kind = "flag", key = "a", version = 1, object = list(key = "a", on = FALSE, variations = list("x"), offVariation = 0)
     )),
@@ -42,7 +44,9 @@ test_that("polling payload parser handles xfer-full events", {
 
 test_that("polling payload transfer-none", {
   payload <- list(events = list(
-    list(event = "server-intent", data = list(payload = list(code = "xfer-none")))
+    list(event = "server-intent", data = list(
+      payloads = list(list(intentCode = "xfer-none"))
+    ))
   ))
   cs <- fdv2_polling_payload_to_changeset(payload)
   expect_true(isTRUE(cs$no_changes))

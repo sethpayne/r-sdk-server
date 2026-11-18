@@ -7,14 +7,38 @@ LD_FDV2_POLL_PATH <- "/sdk/poll"
 LD_FD_FALLBACK_HEADER <- "x-ld-fd-fallback"
 LD_ENVID_HEADER <- "x-ld-envid"
 
+# Allowed tag value charset (sdk-test-harness allAllowedTagChars)
+.ld_tag_value_re <- "^[._a-zA-Z0-9-]+$"
+# sdk-test-harness maxTagValueLength
+.ld_tag_value_max_len <- 64L
+
+#' Validate and build `X-LaunchDarkly-Tags` header value
+#' @keywords internal
+.ld_tags_header_value <- function(config) {
+  parts <- character()
+  app_id <- config$application_id
+  app_ver <- config$application_version
+  id_ok <- is.character(app_id) && length(app_id) == 1L && nzchar(app_id) &&
+    nchar(app_id, type = "chars") <= .ld_tag_value_max_len &&
+    grepl(.ld_tag_value_re, app_id)
+  ver_ok <- is.character(app_ver) && length(app_ver) == 1L && nzchar(app_ver) &&
+    nchar(app_ver, type = "chars") <= .ld_tag_value_max_len &&
+    grepl(.ld_tag_value_re, app_ver)
+  if (id_ok) parts <- c(parts, paste0("application-id/", app_id))
+  if (ver_ok) parts <- c(parts, paste0("application-version/", app_ver))
+  if (length(parts) == 0L) return(NULL)
+  paste(parts, collapse = " ")
+}
+
 #' Perform one FDv2 poll request
 #'
 #' @param config Config list (from [LdConfig]$to_list()).
 #' @param selector Optional list(`state`, `version`).
+#' @param base_uri Optional override for polling base (initializer vs sync).
 #' @return List with `ok`, `changeset` / `error`, `headers`, `fallback_to_fdv1`.
 #' @keywords internal
-fdv2_poll_once <- function(config, selector = NULL) {
-  base <- sub("/$", "", config$base_uri %||% "https://app.launchdarkly.com")
+fdv2_poll_once <- function(config, selector = NULL, base_uri = NULL) {
+  base <- sub("/$", "", base_uri %||% config$base_uri %||% "https://app.launchdarkly.com")
   url <- paste0(base, LD_FDV2_POLL_PATH)
   req <- httr2::request(url) |>
     httr2::req_method("GET") |>
@@ -25,11 +49,8 @@ fdv2_poll_once <- function(config, selector = NULL) {
     ) |>
     httr2::req_timeout(config$read_timeout %||% 15)
 
-  if (!is.null(config$application_id) && nzchar(config$application_id)) {
-    tags <- sprintf("application-id/%s", config$application_id)
-    if (!is.null(config$application_version) && nzchar(config$application_version)) {
-      tags <- paste0(tags, " application-version/", config$application_version)
-    }
+  tags <- .ld_tags_header_value(config)
+  if (!is.null(tags)) {
     req <- httr2::req_headers(req, `X-LaunchDarkly-Tags` = tags)
   }
 
@@ -44,6 +65,9 @@ fdv2_poll_once <- function(config, selector = NULL) {
     req <- httr2::req_url_query(req, !!!query)
   }
 
+  # Return 4xx/5xx bodies so callers can read X-LD-FD-Fallback / EnvID headers
+  # (httr2 otherwise throws before we can inspect the response).
+  req <- httr2::req_error(req, is_error = function(resp) FALSE)
   resp <- tryCatch(
     httr2::req_perform(req),
     error = function(e) e

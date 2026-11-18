@@ -3,7 +3,7 @@
 #' @keywords internal
 NULL
 
-.ld_LONG_SCALE <- 0xFFFFFFFFFFFFFFF # 2^60 - 1 style; use 15 hex digits like Python
+.ld_LONG_SCALE <- 2^60 - 1 # Python __LONG_SCALE__; first 15 hex digits of SHA1
 
 #' Evaluate a flag against a context using store lookups
 #'
@@ -24,7 +24,13 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
   detail <- tryCatch(
     .ld_eval_flag(flag, context, state, get_flag, get_segment),
     error = function(e) {
-      evaluation_detail(default, NULL, list(kind = "ERROR", errorKind = "EXCEPTION"))
+      msg <- conditionMessage(e)
+      kind <- if (grepl("attribute reference|did not specify an attribute|circular ", msg)) {
+        "MALFORMED_FLAG"
+      } else {
+        "EXCEPTION"
+      }
+      evaluation_detail(default, NULL, list(kind = "ERROR", errorKind = kind))
     }
   )
   if (is.null(detail$value) && is.null(detail$variation_index) &&
@@ -219,37 +225,58 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
   hash_key <- paste(prefix, bucketable, sep = ".")
   hex <- digest::digest(hash_key, algo = "sha1", serialize = FALSE)
   # First 15 hex digits as integer / (2^60 - 1), matching Python __LONG_SCALE__
+  # Avoid strtoi() which overflows signed 32-bit for high hex digits.
   h <- substr(hex, 1L, 15L)
-  hi <- strtoi(substr(h, 1L, 7L), 16L)
-  lo <- strtoi(substr(h, 8L, 15L), 16L)
-  hash_val <- as.numeric(hi) * 16^8 + as.numeric(lo)
-  hash_val / 0xFFFFFFFFFFFFFFF
+  hi <- as.numeric(as.hexmode(substr(h, 1L, 7L)))
+  lo_a <- as.numeric(as.hexmode(substr(h, 8L, 11L)))
+  lo_b <- as.numeric(as.hexmode(substr(h, 12L, 15L)))
+  hash_val <- hi * 16^8 + lo_a * 16^4 + lo_b
+  hash_val / .ld_LONG_SCALE
 }
 
 .ld_bucketable_string <- function(u) {
+  if (is.null(u) || length(u) != 1L) return(NULL)
   if (is.logical(u)) return(NULL)
-  if (is.character(u) || (is.numeric(u) && !is.logical(u))) return(as.character(u))
+  if (is.character(u)) return(u)
+  if (is.numeric(u) && !is.logical(u)) {
+    if (is.na(u) || u != floor(u)) return(NULL) # non-integer numerics are not bucketable
+    # Match other SDKs: integer-valued numbers stringify without a fractional part
+    return(format(as.integer(u), scientific = FALSE, trim = TRUE))
+  }
   NULL
 }
 
-.ld_parse_attr_ref <- function(attr) {
-  if (is.null(attr)) return(NULL)
+.ld_parse_attr_ref <- function(attr, literal = FALSE) {
+  if (is.null(attr)) return(list(error = "rule clause did not specify an attribute"))
   if (is.list(attr) && !is.null(attr$path)) attr <- attr$path
   attr <- as.character(attr)
-  if (!nzchar(attr)) return(character())
-  if (startsWith(attr, "/")) {
-    parts <- strsplit(substring(attr, 2L), "/", fixed = TRUE)[[1]]
-    # unescape ~1 -> / and ~0 -> ~
-    parts <- gsub("~1", "/", parts, fixed = TRUE)
-    parts <- gsub("~0", "~", parts, fixed = TRUE)
-    return(parts)
+  if (length(attr) != 1L) return(list(error = "invalid attribute reference"))
+  if (!nzchar(attr)) return(list(error = "invalid attribute reference: empty"))
+  # Legacy clauses (no contextKind): always a literal attribute name, even with `/`.
+  if (isTRUE(literal) || !startsWith(attr, "/")) {
+    return(list(parts = attr))
   }
-  attr
+  raw <- substring(attr, 2L)
+  parts <- strsplit(raw, "/", fixed = TRUE)[[1]]
+  if (length(parts) == 0L || any(!nzchar(parts))) {
+    return(list(error = "invalid attribute reference: empty path component"))
+  }
+  # Validate ~ escapes: only ~0 and ~1 allowed
+  for (p in parts) {
+    if (grepl("~([^01]|$)", p)) {
+      return(list(error = "invalid attribute reference: bad escape"))
+    }
+  }
+  parts <- gsub("~1", "/", parts, fixed = TRUE)
+  parts <- gsub("~0", "~", parts, fixed = TRUE)
+  list(parts = parts)
 }
 
-.ld_attr_value <- function(context, attr) {
-  parts <- .ld_parse_attr_ref(attr)
-  if (is.null(parts) || length(parts) == 0L) return(NULL)
+.ld_attr_value <- function(context, attr, literal = FALSE) {
+  parsed <- .ld_parse_attr_ref(attr, literal = literal)
+  if (!is.null(parsed$error)) stop(parsed$error, call. = FALSE)
+  parts <- parsed$parts
+  if (length(parts) == 0L) return(NULL)
   value <- context_get(context, parts[[1]])
   if (length(parts) == 1L) return(value)
   for (i in 2:length(parts)) {
@@ -284,8 +311,11 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
   }
 
   attr <- clause$attribute
-  if (is.null(attr)) return(FALSE)
-  parts <- .ld_parse_attr_ref(attr)
+  # Absence of contextKind → legacy literal attribute name (even if starts with /)
+  literal <- is.null(clause$contextKind)
+  parsed <- .ld_parse_attr_ref(attr, literal = literal)
+  if (!is.null(parsed$error)) stop(parsed$error, call. = FALSE)
+  parts <- parsed$parts
   if (length(parts) == 1L && identical(parts[[1]], "kind")) {
     return(.ld_maybe_negate(clause, .ld_match_clause_by_kind(clause, context)))
   }
@@ -293,7 +323,7 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
   kind <- clause$contextKind %||% "user"
   actual <- context_get_individual(context, kind)
   if (is.null(actual)) return(FALSE)
-  ctx_value <- .ld_attr_value(actual, attr)
+  ctx_value <- .ld_attr_value(actual, attr, literal = literal)
   if (is.null(ctx_value)) return(FALSE)
 
   if (is.list(ctx_value) && is.null(names(ctx_value))) {

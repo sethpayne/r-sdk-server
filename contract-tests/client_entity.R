@@ -1,4 +1,6 @@
-# Client entity for sdk-test-harness.
+# Client entity for sdk-test-harness v3.
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
 
 ClientEntity <- R6::R6Class(
   "ClientEntity",
@@ -12,7 +14,11 @@ ClientEntity <- R6::R6Class(
       self$tag <- tag
       self$config <- configuration
 
-      opts <- list(sdk_key = configuration$credential %||% "")
+      opts <- list(
+        sdk_key = configuration$credential %||% "",
+        send_events = FALSE,
+        start_wait = 5
+      )
       if (isTRUE(configuration$offline)) opts$offline <- TRUE
 
       endpoints <- configuration$serviceEndpoints %||% list()
@@ -20,6 +26,7 @@ ClientEntity <- R6::R6Class(
       if (!is.null(endpoints$streaming)) opts$stream_uri <- endpoints$streaming
       if (!is.null(endpoints$events)) opts$events_uri <- endpoints$events
 
+      # Legacy streaming/polling config blocks
       if (!is.null(configuration$polling)) {
         opts$stream <- FALSE
         pol <- configuration$polling
@@ -30,10 +37,78 @@ ClientEntity <- R6::R6Class(
         opts$stream <- TRUE
         st <- configuration$streaming
         if (!is.null(st$baseUri)) opts$stream_uri <- st$baseUri
+        if (!is.null(st$initialRetryDelayMs)) {
+          opts$initial_reconnect_delay <- st$initialRetryDelayMs / 1000
+        }
+        # Legacy streaming block without polling → do not probe default poll URI.
+        if (is.null(configuration$polling) && is.null(configuration$dataSystem)) {
+          opts$stream_only <- TRUE
+          opts$skip_poll_init <- TRUE
+        }
       }
-      if (is.null(configuration$events)) {
-        opts$send_events <- FALSE
-      } else {
+
+      # FDv2 dataSystem (harness v3)
+      ds <- configuration$dataSystem
+      if (!is.null(ds)) {
+        inits <- ds$initializers %||% list()
+        poll_init_uris <- character()
+        for (init in inits) {
+          if (!is.null(init$polling)) {
+            if (!is.null(init$polling$baseUri)) {
+              # Preserve order — harness expects each initializer endpoint to be hit.
+              poll_init_uris <- c(poll_init_uris, init$polling$baseUri)
+              opts$base_uri <- init$polling$baseUri
+            }
+            if (!is.null(init$polling$pollIntervalMs)) {
+              opts$poll_interval <- init$polling$pollIntervalMs / 1000
+            }
+          }
+        }
+        if (length(poll_init_uris) > 0L) opts$poll_init_uris <- as.list(poll_init_uris)
+        syncs <- ds$synchronizers %||% list()
+        if (length(syncs) >= 1L) {
+          s0 <- syncs[[1]]
+          if (!is.null(s0$streaming)) {
+            opts$stream <- TRUE
+            if (!is.null(s0$streaming$baseUri)) opts$stream_uri <- s0$streaming$baseUri
+            if (!is.null(s0$streaming$initialRetryDelayMs)) {
+              opts$initial_reconnect_delay <- s0$streaming$initialRetryDelayMs / 1000
+            }
+            # Stream-only when no polling initializer was provided
+            if (length(poll_init_uris) == 0L) {
+              opts$stream_only <- TRUE
+              opts$skip_poll_init <- TRUE
+            }
+          } else if (!is.null(s0$polling)) {
+            opts$stream <- FALSE
+            # Prefer synchronizer poll URI for ongoing sync; keep initializer URI
+            # as base if set, else use sync poll URI for both.
+            if (!is.null(s0$polling$baseUri)) {
+              if (is.null(opts$base_uri)) {
+                opts$base_uri <- s0$polling$baseUri
+              }
+              opts$sync_poll_uri <- s0$polling$baseUri
+              # When there is no separate initializer, sync URI is also the init URI.
+              if (length(poll_init_uris) == 0L) opts$base_uri <- s0$polling$baseUri
+            }
+            if (!is.null(s0$polling$pollIntervalMs)) {
+              opts$poll_interval <- s0$polling$pollIntervalMs / 1000
+            }
+          }
+        }
+        # Optional second synchronizer (poll or stream fallback)
+        if (length(syncs) >= 2L) {
+          if (!is.null(syncs[[2]]$polling$baseUri)) {
+            opts$fallback_poll_uri <- syncs[[2]]$polling$baseUri
+          }
+          if (!is.null(syncs[[2]]$streaming$baseUri)) {
+            opts$fallback_stream_uri <- syncs[[2]]$streaming$baseUri
+          }
+        }
+      }
+
+      if (!is.null(configuration$events)) {
+        opts$send_events <- TRUE
         ev <- configuration$events
         if (!is.null(ev$baseUri)) opts$events_uri <- ev$baseUri
         if (!is.null(ev$capacity)) opts$events_capacity <- ev$capacity
@@ -42,16 +117,36 @@ ClientEntity <- R6::R6Class(
         if (!is.null(ev$globalPrivateAttributes)) {
           opts$private_attributes <- unlist(ev$globalPrivateAttributes, use.names = FALSE)
         }
+        opts$omit_anonymous_contexts <- isTRUE(ev$omitAnonymousContexts)
       }
 
       tags <- configuration$tags %||% list()
       if (!is.null(tags$applicationId)) opts$application_id <- tags$applicationId
       if (!is.null(tags$applicationVersion)) opts$application_version <- tags$applicationVersion
 
-      start_wait_ms <- configuration$startWaitTimeMs %||% 5000
-      cfg <- do.call(launchdarklyServer::ld_config, c(list(sdk_key = opts$sdk_key), opts[names(opts) != "sdk_key"]))
+      wrapper <- configuration$wrapper %||% list()
+      if (!is.null(wrapper$name)) opts$wrapper_name <- wrapper$name
+      if (!is.null(wrapper$version)) opts$wrapper_version <- wrapper$version
+
+      start_wait_ms <- configuration$startWaitTimeMs
+      if (is.null(start_wait_ms)) start_wait_ms <- 5000
+
+      # Short poll interval for tests when unset
+      if (is.null(opts$poll_interval)) opts$poll_interval <- 0.5
+
+      sdk_key <- opts$sdk_key
+      opts$sdk_key <- NULL
+      cfg <- do.call(launchdarklyServer::ld_config, c(list(sdk_key = sdk_key), opts))
+      # Stash extra URIs on config for worker (optional fields)
+      if (!is.null(opts$sync_poll_uri)) cfg$sync_poll_uri <- opts$sync_poll_uri
+      if (!is.null(opts$fallback_poll_uri)) cfg$fallback_poll_uri <- opts$fallback_poll_uri
+      if (!is.null(opts$fallback_stream_uri)) cfg$fallback_stream_uri <- opts$fallback_stream_uri
+      if (!is.null(opts$poll_init_uris)) cfg$poll_init_uris <- opts$poll_init_uris
+      if (isTRUE(opts$stream_only)) cfg$stream_only <- TRUE
+      if (isTRUE(opts$skip_poll_init)) cfg$skip_poll_init <- TRUE
+
       self$client <- launchdarklyServer::ld_client(cfg, start_wait = start_wait_ms / 1000)
-      self$initializing <- !self$client$is_initialized()
+      self$initializing <- !isTRUE(self$client$is_initialized())
       invisible(self)
     },
 
@@ -159,5 +254,3 @@ ClientEntity <- R6::R6Class(
     }
   )
 )
-
-`%||%` <- function(a, b) if (is.null(a)) b else a

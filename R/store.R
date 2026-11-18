@@ -50,19 +50,29 @@ FeatureStore <- R6::R6Class(
       invisible(self)
     },
 
-    upsert = function(kind, key, version, object) {
+    upsert = function(kind, key, version, object, force = FALSE) {
       env <- private$env_for(kind)
       if (is.null(env)) return(invisible(FALSE))
-      if (exists(key, envir = env, inherits = FALSE)) {
+      obj <- object
+      if (is.character(obj) && length(obj) == 1L && nzchar(obj)) {
+        obj <- tryCatch(jsonlite::fromJSON(obj, simplifyVector = FALSE), error = function(e) NULL)
+      }
+      if (!is.list(obj)) return(invisible(FALSE))
+      # Prefer version embedded in the object (flag/segment JSON); envelope
+      # version is a change-set sequence that may differ. FDv2 payloads may
+      # carry a lower model version with a newer selector — callers pass
+      # force=TRUE to trust the change-set.
+      obj_ver <- obj$version %||% version
+      if (!isTRUE(force) && exists(key, envir = env, inherits = FALSE)) {
         cur <- get(key, envir = env, inherits = FALSE)
         cur_ver <- cur$version %||% -1L
-        if (!is.null(cur_ver) && as.integer(version) < as.integer(cur_ver)) {
+        if (!is.null(cur_ver) && as.integer(obj_ver) < as.integer(cur_ver) &&
+            as.integer(version) < as.integer(cur_ver)) {
           return(invisible(FALSE))
         }
       }
-      obj <- object
-      obj$key <- key
-      obj$version <- as.integer(version)
+      if (is.null(obj$key)) obj$key <- key
+      if (is.null(obj$version)) obj$version <- as.integer(version)
       assign(key, obj, envir = env)
       invisible(TRUE)
     },
@@ -113,7 +123,8 @@ FeatureStore <- R6::R6Class(
         private$segments_ <- new.env(parent = emptyenv(), hash = TRUE)
       }
       for (p in cs$puts %||% list()) {
-        self$upsert(p$kind, p$key, p$version, p$object)
+        # Trust FDv2 change-set / selector ordering over per-object versions.
+        self$upsert(p$kind, p$key, p$version, p$object, force = TRUE)
       }
       for (d in cs$deletes %||% list()) {
         self$delete(d$kind, d$key, d$version)
