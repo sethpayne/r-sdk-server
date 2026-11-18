@@ -1,6 +1,6 @@
 # Feature matrix — launchdarklyServer vs python-server-sdk
 
-Draft for Milestone 1. Source of feature list: [python-server-sdk `.sdk_metadata.json`](https://github.com/launchdarkly/python-server-sdk/blob/main/.sdk_metadata.json) plus core client APIs in `ldclient/client.py`.
+Living matrix (updated as milestones land). Source of feature list: [python-server-sdk `.sdk_metadata.json`](https://github.com/launchdarkly/python-server-sdk/blob/main/.sdk_metadata.json) plus core client APIs in `ldclient/client.py`.
 
 **Legend**
 
@@ -16,7 +16,7 @@ Draft for Milestone 1. Source of feature list: [python-server-sdk `.sdk_metadata
 
 | Feature (Python metadata / API) | Python | R plan | Notes |
 |---------------------------------|--------|--------|-------|
-| Contexts | yes (8.0+) | **v1** | Required evaluation model |
+| Contexts | yes (8.0+) | **v1 (M2)** | `ld_context` / builders; S3 + R6 builders |
 | `variation` / `variation_detail` | yes | **v1** | |
 | `all_flags_state` / allFlags | yes | **v1** | Bootstrap / front-end state |
 | `track` / custom events | yes | **v1** | |

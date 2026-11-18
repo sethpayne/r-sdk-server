@@ -22,32 +22,53 @@ Living document for the unofficial R server-side SDK. Update when decisions chan
 
 ---
 
-## Open questions for Seth (human review)
+## Decisions (Milestone 2+) — resolved without Seth consult
 
-1. **GitHub repo name:** Project identity says `r-server-sdk`; this remote is `sethpayne/r-sdk-server`. Rename remote, keep both names in docs, or treat `r-sdk-server` as canonical in `constants.R`?
-2. **Official SDK name / user-agent string:** Placeholder `SDK_NAME` / `USER_AGENT` until LaunchDarkly assigns — confirm format preference (e.g. `RServerClient/<version>` vs waiting).
-3. **Confirm callr process model** vs preference for pure `later`+httr2 (e.g. stronger CRAN/Windows concerns).
-4. **Singleton API:** Expose `ld_set_config()` / `ld_get_client()` like Python, or construct-only R6 for v1?
-5. **`postfork()`:** Require explicit call (Python) vs auto-reinit on first use after PID change (more magic)?
-6. **CRAN goal:** Is CRAN publication a near-term goal (affects Examples, net checks, callr policies)?
-7. **File/test data sources:** Promote into v1 if needed for harness earlier than FEATURES “later”?
-8. **Contract-test hosting:** Plumber vs httpuv vs `servr` for sdk-test-harness service process?
-9. **Default start wait:** Python uses 5s — same for R?
-10. **Multi-context / Migration flags:** Confirm migrations stay out even if harness suites mention them (plan: skip/omit those suites).
+Per project direction: implement using Python SDK + specs as source of truth.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D12 | Repo constant stays **`r-server-sdk`**; remote may be `r-sdk-server` (`LD_GITHUB_REMOTE_HINT`) | Project identity; do not rename remote from agent |
+| D13 | User-Agent stays **`RServerClient-Unofficial/<ver>`** until LD assigns | Matches M1 placeholder |
+| D14 | **callr confirmed** as process model | DESIGN D1; no CRAN/Windows evidence against yet |
+| D15 | **Construct-only R6** for v1 (`ld_client` / `LdClient`); no singleton helpers | Simpler; Python singleton is optional sugar |
+| D16 | **`postfork()` explicit** (Python parity); on PID mismatch log once + fail-safe defaults until re-init | Avoid magic auto-reinit |
+| D17 | CRAN-ready hygiene (no net in default check) but **publication not blocking** v1 | Prepare Examples/skips; ship unofficial GitHub first |
+| D18 | **Test data source** promoted into harness path (M8); file DS still later unless harness needs | FEATURES “later” → v1 when required |
+| D19 | Contract service = **httpuv** (no Plumber dep) | Assignment: httpuv/plumber; httpuv is lighter Suggests |
+| D20 | Default **start wait = 5s** | Python `startWaitTimeMs` default 5000 |
+| D21 | Migrations suites **omitted/suppressed**; migrations stay out | FEATURES out of scope |
+| D22 | Context builder method is **`mark_private()`** (R6 reserves `private`) | R deviation from Python `.private()`; harness maps field `private` → `mark_private` |
+| D23 | Context is immutable **S3** (`ld_context`); builders are **R6** | Matches Python immutability without R6 copy traps |
+
+---
+
+## Open questions (non-blocking)
+
+None that block M2–M10. Official SDK name / user-agent remains pending LaunchDarkly assignment.
 
 ---
 
 ## Suppressions
 
-N/A for Milestone 1 (no harness / CI suppressions yet).
+N/A until harness CI (see later milestones). Planned: migrations / big-segments / persistent-store / hooks / OTEL / FDv1 suites with justifications in `suppressions.txt`.
 
 ---
 
-## Sources read for M1 (non-exhaustive)
+## Deviations from Python
 
-- https://github.com/launchdarkly/python-server-sdk (README, `.sdk_metadata.json`, `ldclient/client.py`, `ldclient/datasystem.py`, `ldclient/impl/datasystem/fdv2.py`, LICENSE)
-- https://github.com/launchdarkly/ruby-server-sdk (`lib/ldclient-rb/data_system.rb`)
-- https://github.com/launchdarkly/go-server-sdk (FDv2 initializer/synchronizer behavior via public docs/commits)
+| Area | Deviation | Why |
+|------|-----------|-----|
+| Concurrency | callr process vs threads | R has no threads |
+| FDv1 | Not implemented | Fail-safe + log on `fdv1Fallback` |
+| Context API | `mark_private()` not `private()` | R6 keyword |
+| Context type | S3 list vs Python class | Idiomatic immutable R |
+| Singleton | Omitted in v1 | D15 |
+
+---
+
+## Sources read for M1–M2 (non-exhaustive)
+
+- https://github.com/launchdarkly/python-server-sdk (`ldclient/context.py`, `contract-tests/client_entity.py`, `contract-tests/service.py`)
 - https://github.com/launchdarkly/sdk-test-harness/tree/v3
-- https://github.com/launchdarkly/open-sdk-specs (hooks/OTEL present; not full SDK spec)
-- https://launchdarkly.com/docs/sdk/features/data-saving-mode (initializer vs selector / ready semantics)
+- https://github.com/launchdarkly/open-sdk-specs
