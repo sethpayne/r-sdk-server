@@ -1,9 +1,9 @@
 # Offline curl-multi streaming coverage via local Python SSE servers.
 
 test_that("fdv2_stream_once covers ok/multi/goodbye/error/badjson/401/403", {
-  # Local loopback only (no live LD). Skip if python3 unavailable in the env.
-  skip_if_not(nzchar(Sys.which("python3")), "python3 not available")
-  skip_if_not_installed("processx")
+  # Local loopback only (no live LD). webfakes subprocess avoids same-process
+  # httpuv deadlock and removes the Python sidecar that broke on macOS CI.
+  skip_if_not_installed("webfakes")
 
   # Success + tags + basis + filter
   s <- .ld_start_local_sse("ok")
