@@ -28,8 +28,10 @@ ProcessWorker <- R6::R6Class(
       env[["LAUNCHDARKLY_WORKER_LIB"]] <- paste(.libPaths(), collapse = .Platform$path.sep)
       env[["LAUNCHDARKLY_PKG_PATH"]] <- private$pkg_path()
 
+      rscript <- file.path(R.home("bin"), "Rscript")
+      if (!file.exists(rscript)) rscript <- "Rscript"
       private$proc_ <- processx::process$new(
-        "Rscript",
+        rscript,
         c(script),
         stdin = "|",
         stdout = "|",
@@ -49,7 +51,7 @@ ProcessWorker <- R6::R6Class(
       if (!self$is_alive()) stop("Worker is not running", call. = FALSE)
       msg <- list(v = 1L, type = type, payload = payload)
       if (!is.null(id)) msg$id <- id
-      line <- paste0(jsonlite::toJSON(msg, auto_unbox = TRUE, null = "null"), "\n")
+      line <- paste0(jsonlite::toJSON(msg, auto_unbox = TRUE, null = "null", digits = NA), "\n")
       private$proc_$write_input(line)
       invisible(self)
     },
@@ -108,11 +110,15 @@ ProcessWorker <- R6::R6Class(
     on_message_ = NULL,
     started_ = FALSE,
     pkg_path = function() {
-      p <- tryCatch(pkgload::pkg_path(), error = function(e) "")
-      if (!nzchar(p)) {
-        p <- system.file(package = "launchdarklyServer")
+      # Prefer installed package path; only use pkgload source tree when it
+      # clearly contains R/*.R sources (dev load_all workflow).
+      installed <- system.file(package = "launchdarklyServer")
+      src <- tryCatch(pkgload::pkg_path(), error = function(e) "")
+      if (nzchar(src)) {
+        r_src <- list.files(file.path(src, "R"), pattern = "\\.[Rr]$")
+        if (length(r_src) > 0L) return(src)
       }
-      p
+      installed
     },
     dev_worker_script = function() {
       root <- tryCatch(pkgload::pkg_path(), error = function(e) NULL)

@@ -30,6 +30,11 @@ LdConfig <- R6::R6Class(
     payload_filter_key = NULL,
     diagnostic_opt_out = TRUE,
     omit_anonymous_contexts = FALSE,
+    sync_poll_uri = NULL,
+    fallback_poll_uri = NULL,
+    fallback_stream_uri = NULL,
+    stream_only = FALSE,
+    skip_poll_init = FALSE,
 
     #' @param sdk_key LaunchDarkly SDK key.
     initialize = function(sdk_key = "") {
@@ -61,7 +66,12 @@ LdConfig <- R6::R6Class(
         initial_reconnect_delay = self$initial_reconnect_delay,
         payload_filter_key = self$payload_filter_key,
         diagnostic_opt_out = isTRUE(self$diagnostic_opt_out),
-        omit_anonymous_contexts = isTRUE(self$omit_anonymous_contexts)
+        omit_anonymous_contexts = isTRUE(self$omit_anonymous_contexts),
+        sync_poll_uri = self$sync_poll_uri,
+        fallback_poll_uri = self$fallback_poll_uri,
+        fallback_stream_uri = self$fallback_stream_uri,
+        stream_only = isTRUE(self$stream_only),
+        skip_poll_init = isTRUE(self$skip_poll_init)
       )
     }
   )

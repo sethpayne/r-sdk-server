@@ -5,7 +5,7 @@
 emit <- function(type, payload = list(), id = NULL) {
   msg <- list(v = 1L, type = type, payload = payload)
   if (!is.null(id)) msg$id <- id
-  cat(jsonlite::toJSON(msg, auto_unbox = TRUE, null = "null"), "\n", sep = "")
+  cat(jsonlite::toJSON(msg, auto_unbox = TRUE, null = "null", digits = NA), "\n", sep = "")
   flush(stdout())
 }
 
@@ -16,13 +16,40 @@ emit_log <- function(level, message, code = NULL) {
 lib <- Sys.getenv("LAUNCHDARKLY_WORKER_LIB", unset = "")
 if (nzchar(lib)) .libPaths(c(strsplit(lib, .Platform$path.sep, fixed = TRUE)[[1]], .libPaths()))
 pkg_path <- Sys.getenv("LAUNCHDARKLY_PKG_PATH", unset = "")
-if (nzchar(pkg_path) && requireNamespace("pkgload", quietly = TRUE)) {
-  pkgload::load_all(pkg_path, quiet = TRUE)
-} else if (requireNamespace("launchdarklyServer", quietly = TRUE)) {
-  library(launchdarklyServer)
+loaded <- FALSE
+# Dev: load_all only for a SOURCE tree (R/*.R files). An installed package also
+# has DESCRIPTION + R/, but load_all() there yields an empty namespace.
+r_src <- if (nzchar(pkg_path)) {
+  list.files(file.path(pkg_path, "R"), pattern = "\\.[Rr]$", full.names = FALSE)
 } else {
+  character()
+}
+if (nzchar(pkg_path) &&
+    file.exists(file.path(pkg_path, "DESCRIPTION")) &&
+    length(r_src) > 0L &&
+    requireNamespace("pkgload", quietly = TRUE)) {
+  loaded <- isTRUE(tryCatch({
+    pkgload::load_all(pkg_path, quiet = TRUE)
+    TRUE
+  }, error = function(e) FALSE))
+}
+if (!loaded && requireNamespace("launchdarklyServer", quietly = TRUE)) {
+  library(launchdarklyServer)
+  loaded <- TRUE
+}
+if (!loaded) {
   emit("Fatal", list(message = "launchdarklyServer not available in worker"))
   quit(save = "no", status = 1)
+}
+
+# library() only attaches exports; bind internals the worker needs.
+.ld_ns <- tryCatch(asNamespace("launchdarklyServer"), error = function(e) NULL)
+if (!is.null(.ld_ns)) {
+  for (sym in c("fdv2_poll_once", "fdv2_stream_once", "ld_post_events")) {
+    if (!exists(sym, inherits = FALSE) && exists(sym, envir = .ld_ns, inherits = FALSE)) {
+      assign(sym, get(sym, envir = .ld_ns), envir = environment())
+    }
+  }
 }
 
 config <- NULL
@@ -58,8 +85,12 @@ apply_ok_changeset <- function(result) {
   emit("Status", list(state = status))
 }
 
-do_poll <- function() {
-  result <- fdv2_poll_once(config, selector)
+do_poll <- function(use_sync_uri = FALSE) {
+  uri <- NULL
+  if (isTRUE(use_sync_uri) && !is.null(config$sync_poll_uri) && nzchar(config$sync_poll_uri)) {
+    uri <- config$sync_poll_uri
+  }
+  result <- fdv2_poll_once(config, selector, base_uri = uri)
   last_sync_at <<- proc.time()[["elapsed"]]
   if (isTRUE(result$fallback_to_fdv1)) {
     handle_fdv1_fallback()
@@ -69,6 +100,14 @@ do_poll <- function() {
   if (!isTRUE(result$ok)) {
     status <<- "interrupted"
     emit("Status", list(state = status, error = result$error))
+    # Optional secondary poll fallback URI
+    if (!is.null(config$fallback_poll_uri) && nzchar(config$fallback_poll_uri)) {
+      result2 <- fdv2_poll_once(config, selector, base_uri = config$fallback_poll_uri)
+      if (isTRUE(result2$ok)) {
+        apply_ok_changeset(result2)
+        return(result2)
+      }
+    }
     return(result)
   }
   apply_ok_changeset(result)
@@ -76,18 +115,47 @@ do_poll <- function() {
 }
 
 do_stream <- function() {
-  result <- fdv2_stream_once(config, selector)
+  # Keep the SSE connection open and apply every payload-transferred until the
+  # server goodbye/errors or the read timeout elapses (harness multi-update suites).
+  result <- fdv2_stream_once(
+    config,
+    selector,
+    on_changeset = function(cs) {
+      apply_ok_changeset(list(ok = TRUE, changeset = cs))
+      selector <<- store$selector()
+    },
+    until_first_payload = FALSE
+  )
   last_sync_at <<- proc.time()[["elapsed"]]
   if (isTRUE(result$fallback_to_fdv1)) {
     handle_fdv1_fallback()
     return(result)
   }
+  # Permanent primary removal (401/403): switch to fallback stream if configured
+  if (!isTRUE(result$ok) && !is.null(result$status) && result$status %in% c(401L, 403L)) {
+    fb <- config$fallback_stream_uri
+    if (!is.null(fb) && nzchar(fb)) {
+      emit_log("info", "Primary stream permanently failed; switching to secondary")
+      config$stream_uri <<- fb
+      config$fallback_stream_uri <<- NULL
+      result <- fdv2_stream_once(
+        config, selector,
+        on_changeset = function(cs) {
+          apply_ok_changeset(list(ok = TRUE, changeset = cs))
+          selector <<- store$selector()
+        },
+        until_first_payload = FALSE
+      )
+      last_sync_at <<- proc.time()[["elapsed"]]
+      if (isTRUE(result$ok)) return(result)
+    }
+  }
   if (!isTRUE(result$ok)) {
+    # goodbye / malformed → reconnect; don't mark permanently off
     status <<- "interrupted"
     emit("Status", list(state = status, error = result$error))
     return(result)
   }
-  apply_ok_changeset(result)
   result
 }
 
@@ -112,12 +180,31 @@ handle_start <- function(payload) {
     return(invisible(NULL))
   }
 
-  # Initializer: always poll once for basis (parity with default chain)
-  result <- do_poll()
+  # Initializer: poll when a polling base URI is available; otherwise stream-only.
+  has_poll_init <- !is.null(config$base_uri) && nzchar(config$base_uri) &&
+    !isTRUE(config$stream_only)
+  # Heuristic: if stream is enabled and no explicit poll initializer was wired
+  # (sync_poll_uri unset and stream_uri differs from default poll base), prefer
+  # streaming for first contact when stream_only is set by the contract service.
+  if (isTRUE(config$stream_only) || (isTRUE(use_stream) && isTRUE(config$skip_poll_init))) {
+    result <- do_stream()
+  } else {
+    result <- do_poll(use_sync_uri = FALSE)
+  }
   if (identical(status, "off")) {
     emit("Ready", list(fail_safe = TRUE))
     return(invisible(NULL))
   }
+  # If a distinct polling synchronizer URI is configured, hit it immediately
+  # so harness tag/header assertions on the synchronizer endpoint succeed.
+  if (!isTRUE(use_stream) &&
+      !is.null(config$sync_poll_uri) && nzchar(config$sync_poll_uri) &&
+      !identical(config$sync_poll_uri, config$base_uri)) {
+    result <- do_poll(use_sync_uri = TRUE)
+  }
+  # Allow the main loop to contact the synchronizer immediately (tags / header
+  # suites await the synchronizer endpoint right after client construction).
+  last_sync_at <<- -Inf
   if (!isTRUE(result$ok)) {
     emit("Ready", list(initialized = FALSE))
   } else {
@@ -179,7 +266,7 @@ while (isTRUE(running)) {
         }
       }
     } else if ((now - last_sync_at) >= poll_interval) {
-      res <- do_poll()
+      res <- do_poll(use_sync_uri = TRUE)
       # Recovery: after sustained valid polling, try stream again
       if (isTRUE(res$ok) && isTRUE(use_stream)) {
         seconds_valid <<- seconds_valid + poll_interval

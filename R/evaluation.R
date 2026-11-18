@@ -44,20 +44,33 @@ FeatureFlagsState <- R6::R6Class(
       if (is.null(m)) NULL else m$reason
     },
     add_flag = function(key, value, variation = NULL, version = NULL, reason = NULL,
-                        track_events = FALSE, track_reason = FALSE) {
-      private$values_[[key]] <- value
+                        track_events = FALSE, track_reason = FALSE,
+                        debug_events_until_date = NULL) {
+      # R list[[key]] <- NULL removes the key; preserve JSON null via list(NULL)
+      if (is.null(value)) {
+        private$values_[key] <- list(NULL)
+      } else {
+        private$values_[[key]] <- value
+      }
       meta <- list()
-      if (!is.null(variation)) meta$variation <- variation
-      if (!is.null(version)) meta$version <- version
+      if (!is.null(variation)) meta$variation <- as.integer(variation)
+      if (!is.null(version)) meta$version <- as.integer(version)
       if (!is.null(reason)) meta$reason <- reason
       if (isTRUE(track_events)) meta$trackEvents <- TRUE
       if (isTRUE(track_reason)) meta$trackReason <- TRUE
+      if (!is.null(debug_events_until_date) && !identical(debug_events_until_date, NULL)) {
+        meta$debugEventsUntilDate <- debug_events_until_date
+      }
+      # Drop NULL-ish empties for compact representation
       private$meta_[[key]] <- meta
       invisible(self)
     },
     to_json_list = function() {
       ret <- private$values_
-      ret[["$flagsState"]] <- private$meta_
+      # Omit empty meta objects' null fields already; ensure list not empty array
+      meta <- private$meta_
+      if (length(meta) == 0L) meta <- setNames(list(), character())
+      ret[["$flagsState"]] <- meta
       ret[["$valid"]] <- private$valid_
       ret
     }

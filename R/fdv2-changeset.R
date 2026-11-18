@@ -33,7 +33,13 @@ fdv2_polling_payload_to_changeset <- function(data) {
     ev <- event$event
 
     if (identical(ev, LD_EVENT_SERVER_INTENT)) {
-      code <- event$data$payload$code %||% event$data$code
+      # Wire format: { payloads: [ { intentCode, id, target, reason } ] }
+      payloads <- event$data$payloads
+      code <- NULL
+      if (is.list(payloads) && length(payloads) >= 1L) {
+        code <- payloads[[1]]$intentCode %||% payloads[[1]]$code
+      }
+      code <- code %||% event$data$payload$code %||% event$data$code
       if (identical(code, LD_INTENT_TRANSFER_NONE)) {
         return(list(no_changes = TRUE))
       }

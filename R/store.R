@@ -53,16 +53,20 @@ FeatureStore <- R6::R6Class(
     upsert = function(kind, key, version, object) {
       env <- private$env_for(kind)
       if (is.null(env)) return(invisible(FALSE))
+      # Prefer version embedded in the object (flag/segment JSON); envelope
+      # version is a change-set sequence that may differ.
+      obj_ver <- object$version %||% version
       if (exists(key, envir = env, inherits = FALSE)) {
         cur <- get(key, envir = env, inherits = FALSE)
         cur_ver <- cur$version %||% -1L
-        if (!is.null(cur_ver) && as.integer(version) < as.integer(cur_ver)) {
+        if (!is.null(cur_ver) && as.integer(obj_ver) < as.integer(cur_ver) &&
+            as.integer(version) < as.integer(cur_ver)) {
           return(invisible(FALSE))
         }
       }
       obj <- object
-      obj$key <- key
-      obj$version <- as.integer(version)
+      if (is.null(obj$key)) obj$key <- key
+      if (is.null(obj$version)) obj$version <- as.integer(version)
       assign(key, obj, envir = env)
       invisible(TRUE)
     },

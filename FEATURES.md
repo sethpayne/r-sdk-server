@@ -71,11 +71,11 @@ Unless a future LaunchDarkly review requires parity:
 
 ## Gaps vs Python that are “later” (not out)
 
-- File + test data sources  
-- Flag change listeners  
+- File data source (test data source is done)  
 - Proxy / compression / diagnostics polish  
 - Relay-as-proxy via URI overrides beyond basic config  
 - Package singleton helpers  
-- Full sdk-test-harness service  
+- Full streaming HTTP retry-status matrix (reconnect + poll fallback exist; see suppressions)  
+- covr ≥90% on evaluator/context/data/events (currently ~70–80% parent-process; worker IPC lost to covr)  
 
 Reasons: shrink v1 to correct FDv2 evaluation + events + process safety; add integrations after the core is harness-green.

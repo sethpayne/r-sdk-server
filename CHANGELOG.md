@@ -15,3 +15,11 @@ All notable changes to this unofficial project are documented here.
 - Milestone 8: Hooks, flag change listeners, TestData source
 - Milestone 9: Hardening tests (fork/postfork, shutdown, micro-benchmark), SECURITY.md
 - Milestone 10: README, vignettes, pkgdown config, CHANGELOG
+
+### DoD hardening (follow-up)
+- FDv2 stream path `/sdk/stream` with connection SSE (multi-payload), tags sanitization, sync poll URI
+- Evaluator: legacy attribute refs, MALFORMED_FLAG for bad refs/cycles, RFC3339 dates, semver prerelease, bucketing scale
+- `all_flags_state`: null values, experimentation `trackReason`, CLIENT_NOT_READY
+- GitHub Actions R CMD check matrix (OS × release/devel/oldrel) + covr gate script
+- CI soak (`scripts/soak-ci.R`) + documented 24h soak (`scripts/soak-24h.R`)
+- R CMD check `--as-cran`: 0 errors / 0 warnings (2 environmental notes)

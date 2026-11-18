@@ -56,7 +56,7 @@ json_response <- function(status, body, headers = list()) {
   } else if (is.character(body) && length(body) == 1L && !is.list(body)) {
     body
   } else {
-    as.character(toJSON(body, auto_unbox = TRUE, null = "null"))
+    as.character(toJSON(body, auto_unbox = TRUE, null = "null", digits = NA))
   }
   h <- c(list("Content-Type" = "application/json"), headers)
   list(status = as.integer(status), headers = h, body = payload)

@@ -39,11 +39,17 @@ LdClient <- R6::R6Class(
       private$worker_$send("Start", config$to_list())
 
       ready <- private$worker_$wait_for_type("Ready", timeout_s = wait)
-      # Drain any messages received alongside Ready
+      # Drain any messages received alongside Ready (StoreSnapshot may trail)
       private$worker_$drain()
       if (is.null(ready)) {
         # Timed out — client usable with defaults until data arrives
         private$initialized_ <- private$store_$is_initialized()
+      } else {
+        private$initialized_ <- isTRUE(ready$payload$initialized) ||
+          private$store_$is_initialized()
+        if (isTRUE(ready$payload$offline) || isTRUE(ready$payload$fail_safe)) {
+          private$data_status_ <- "off"
+        }
       }
       invisible(self)
     },
@@ -76,20 +82,54 @@ LdClient <- R6::R6Class(
       if (!context_valid(context)) {
         return(FeatureFlagsState$new(FALSE))
       }
-      state <- FeatureFlagsState$new(private$store_$is_initialized())
+      if (!isTRUE(private$initialized_) || !private$store_$is_initialized()) {
+        return(FeatureFlagsState$new(FALSE))
+      }
+      state <- FeatureFlagsState$new(TRUE)
       flags <- private$store_$all_flags()
+      now_ms <- round(as.numeric(Sys.time()) * 1000)
       for (key in names(flags)) {
         flag <- flags[[key]]
         if (isTRUE(flag$deleted)) next
-        if (isTRUE(client_side_only) && !isTRUE(flag$clientSide)) next
+        if (isTRUE(client_side_only) && !isTRUE(flag$clientSide) && !isTRUE(flag$clientSideAvailability$usingEnvironmentId)) next
         detail <- private$evaluate_flag(flag, context, NULL)
+        track_events <- isTRUE(flag$trackEvents)
+        track_reason <- isTRUE(detail$reason$inExperiment)
+        rk <- detail$reason$kind %||% ""
+        if (identical(rk, "FALLTHROUGH") && isTRUE(flag$trackEventsFallthrough)) {
+          track_events <- TRUE
+          track_reason <- TRUE
+        }
+        if (identical(rk, "RULE_MATCH")) {
+          ri <- detail$reason$ruleIndex
+          rules <- flag$rules %||% list()
+          if (!is.null(ri) && !is.na(ri) && ri >= 0L && ri < length(rules) &&
+              isTRUE(rules[[ri + 1L]]$trackEvents)) {
+            track_events <- TRUE
+            track_reason <- TRUE
+          }
+        }
+        debug_until <- flag$debugEventsUntilDate
+        omit_details <- FALSE
+        if (isTRUE(details_only_for_tracked_flags)) {
+          if (!track_events && !track_reason &&
+              (is.null(debug_until) || !(is.numeric(debug_until) && debug_until > now_ms))) {
+            omit_details <- TRUE
+          }
+        }
+        reason <- NULL
+        if ((isTRUE(with_reasons) || track_reason) && !omit_details) {
+          reason <- detail$reason
+        }
         state$add_flag(
           key,
           detail$value,
           variation = detail$variation_index,
-          version = flag$version,
-          reason = if (isTRUE(with_reasons)) detail$reason else NULL,
-          track_events = isTRUE(flag$trackEvents)
+          version = if (!omit_details) flag$version else NULL,
+          reason = reason,
+          track_events = track_events,
+          track_reason = track_reason,
+          debug_events_until_date = if (!omit_details) debug_until else NULL
         )
       }
       state
@@ -243,6 +283,9 @@ LdClient <- R6::R6Class(
 
     evaluate_internal = function(key, context, default) {
       if (Sys.getpid() != private$owner_pid_) {
+        return(evaluation_detail(default, NULL, list(kind = "ERROR", errorKind = "CLIENT_NOT_READY")))
+      }
+      if (!isTRUE(private$initialized_) || !private$store_$is_initialized()) {
         return(evaluation_detail(default, NULL, list(kind = "ERROR", errorKind = "CLIENT_NOT_READY")))
       }
       if (!context_valid(context)) {

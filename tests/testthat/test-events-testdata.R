@@ -28,10 +28,10 @@ test_that("flag change listener fires on test apply via tracker notify", {
 test_that("streaming parser accepts SSE body via webfakes", {
   skip_if_not_installed("webfakes")
   app <- webfakes::new_app()
-  app$get("/meval/v2/stream", function(req, res) {
+  app$get("/sdk/stream", function(req, res) {
     body <- paste(
       "event: server-intent",
-      "data: {\"payload\":{\"code\":\"xfer-full\"}}",
+      "data: {\"payloads\":[{\"intentCode\":\"xfer-full\",\"id\":\"p\",\"target\":1,\"reason\":\"initial\"}]}",
       "",
       "event: put-object",
       "data: {\"kind\":\"flag\",\"key\":\"sf\",\"version\":1,\"object\":{\"key\":\"sf\",\"on\":true,\"variations\":[false,true],\"fallthrough\":{\"variation\":1}}}",
@@ -47,7 +47,7 @@ test_that("streaming parser accepts SSE body via webfakes", {
   server <- webfakes::new_app_process(app)
   on.exit(server$stop(), add = TRUE)
   cfg <- list(sdk_key = "k", stream_uri = server$url(), read_timeout = 5)
-  result <- fdv2_stream_once(cfg, NULL)
+  result <- suppressWarnings(fdv2_stream_once(cfg, NULL))
   expect_true(result$ok)
   expect_equal(result$changeset$selector$state, "s")
 })

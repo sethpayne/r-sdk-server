@@ -5,6 +5,8 @@ test_that("contract service contextBuild/contextConvert smoke", {
   port <- httpuv::randomPort()
   repo <- normalizePath(testthat::test_path("../.."))
   service_script <- file.path(repo, "contract-tests", "service.R")
+  # contract-tests/ is excluded from the built package (.Rbuildignore); skip under R CMD check
+  skip_if_not(file.exists(service_script), "contract-tests/service.R not in package tree")
 
   # Start service in background process
   proc <- callr::r_bg(
@@ -22,8 +24,10 @@ test_that("contract service contextBuild/contextConvert smoke", {
   if (proc$is_alive()) proc$kill()
 
   log_file <- tempfile("cts")
+  rscript <- file.path(R.home("bin"), "Rscript")
+  if (!file.exists(rscript)) rscript <- Sys.which("Rscript")
   px <- processx::process$new(
-    "Rscript",
+    rscript,
     c(service_script, as.character(port)),
     stdout = log_file,
     stderr = "2>&1",
