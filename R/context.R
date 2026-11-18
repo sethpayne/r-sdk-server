@@ -163,16 +163,19 @@ context_create_multi <- function(...) {
 
 #' Convenience constructor for a single-kind context
 #'
+#' Options follow `...` so that custom attributes are never partially matched
+#' to them (e.g. `n = 1` must not set `name`).
+#'
 #' @param key Context key.
+#' @param ... Additional custom attributes as named arguments.
 #' @param kind Context kind (default `"user"`).
 #' @param name Optional name.
 #' @param anonymous Logical.
-#' @param ... Additional custom attributes as named arguments.
 #' @param private Character vector of private attribute references.
 #' @return An `ld_context`.
 #' @export
-ld_context <- function(key, kind = "user", name = NULL, anonymous = FALSE,
-                       ..., private = NULL) {
+ld_context <- function(key, ..., kind = "user", name = NULL, anonymous = FALSE,
+                       private = NULL) {
   b <- context_builder(key)
   b$kind(kind)
   if (!is.null(name)) b$name(name)
@@ -357,6 +360,9 @@ context_to_json <- function(context) {
 context_from_list <- function(props) {
   if (is.null(props)) {
     return(.ld_make_invalid("Cannot use None as a context"))
+  }
+  if (!is.list(props)) {
+    return(.ld_make_invalid("context data must be a JSON object"))
   }
   kind <- props[["kind"]]
   if (!is.character(kind) || length(kind) != 1L) {
