@@ -1,6 +1,6 @@
 # Design — launchdarklyServer (unofficial R server-side SDK)
 
-**Status:** Milestone 1 (design + skeleton). Unofficial until LaunchDarkly assigns an official SDK name/identity.
+**Status:** Milestones in progress (M1 design done; M2+ implementation). Unofficial until LaunchDarkly assigns an official SDK name/identity.
 
 **Primary reference:** [launchdarkly/python-server-sdk](https://github.com/launchdarkly/python-server-sdk) (including contract-tests).  
 **FDv2 cross-check:** [ruby-server-sdk](https://github.com/launchdarkly/ruby-server-sdk), [go-server-sdk](https://github.com/launchdarkly/go-server-sdk), [java-core](https://github.com/launchdarkly/java-core).  
