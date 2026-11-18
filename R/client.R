@@ -238,30 +238,14 @@ LdClient <- R6::R6Class(
       private$evaluate_flag(flag, context, default)
     },
 
-    # Minimal evaluator (full rules/targets/prereqs in M5)
     evaluate_flag = function(flag, context, default) {
-      if (!isTRUE(flag$on)) {
-        return(private$off_value(flag, default, list(kind = "OFF")))
-      }
-      # Fallthrough variation index if present
-      ft <- flag$fallthrough
-      if (!is.null(ft$variation)) {
-        idx <- as.integer(ft$variation)
-        vars <- flag$variations
-        if (!is.null(vars) && idx >= 0L && idx < length(vars)) {
-          return(evaluation_detail(vars[[idx + 1L]], idx, list(kind = "FALLTHROUGH")))
-        }
-      }
-      evaluation_detail(default, NULL, list(kind = "FALLTHROUGH"))
-    },
-
-    off_value = function(flag, default, reason) {
-      ov <- flag$offVariation
-      vars <- flag$variations
-      if (!is.null(ov) && !is.null(vars) && ov >= 0L && ov < length(vars)) {
-        return(evaluation_detail(vars[[as.integer(ov) + 1L]], as.integer(ov), reason))
-      }
-      evaluation_detail(default, NULL, reason)
+      ld_evaluate_flag(
+        flag,
+        context,
+        default,
+        get_flag = function(k) private$store_$get_flag(k),
+        get_segment = function(k) private$store_$get_segment(k)
+      )
     }
   )
 )

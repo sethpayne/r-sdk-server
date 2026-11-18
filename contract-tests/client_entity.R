@@ -1,4 +1,4 @@
-# Client entity for sdk-test-harness (M3: context commands; later milestones fill in).
+# Client entity for sdk-test-harness.
 
 ClientEntity <- R6::R6Class(
   "ClientEntity",
@@ -11,23 +11,99 @@ ClientEntity <- R6::R6Class(
     initialize = function(tag, configuration) {
       self$tag <- tag
       self$config <- configuration
-      # M3: no real LdClient yet. Offline/stub so context-only suites can run.
-      # M4+ will construct launchdarklyServer::LdClient from configuration.
-      self$client <- NULL
-      offline <- isTRUE(configuration$offline)
-      init_can_fail <- isTRUE(configuration$initCanFail)
-      # Treat as initialized for context-only / offline stub clients.
-      self$initializing <- FALSE
-      if (!offline && is.null(configuration$streaming) && is.null(configuration$polling) &&
-          is.null(configuration$dataSystem) && is.null(configuration$serviceEndpoints)) {
-        # No data source configured — still OK for contextBuild/contextConvert.
-        self$initializing <- FALSE
+
+      opts <- list(sdk_key = configuration$credential %||% "")
+      if (isTRUE(configuration$offline)) opts$offline <- TRUE
+
+      endpoints <- configuration$serviceEndpoints %||% list()
+      if (!is.null(endpoints$polling)) opts$base_uri <- endpoints$polling
+      if (!is.null(endpoints$streaming)) opts$stream_uri <- endpoints$streaming
+      if (!is.null(endpoints$events)) opts$events_uri <- endpoints$events
+
+      if (!is.null(configuration$polling)) {
+        opts$stream <- FALSE
+        pol <- configuration$polling
+        if (!is.null(pol$baseUri)) opts$base_uri <- pol$baseUri
+        if (!is.null(pol$pollIntervalMs)) opts$poll_interval <- pol$pollIntervalMs / 1000
       }
+      if (!is.null(configuration$streaming)) {
+        opts$stream <- TRUE
+        st <- configuration$streaming
+        if (!is.null(st$baseUri)) opts$stream_uri <- st$baseUri
+      }
+      if (is.null(configuration$events)) {
+        opts$send_events <- FALSE
+      } else {
+        ev <- configuration$events
+        if (!is.null(ev$baseUri)) opts$events_uri <- ev$baseUri
+        if (!is.null(ev$capacity)) opts$events_capacity <- ev$capacity
+        if (!is.null(ev$flushIntervalMs)) opts$flush_interval <- ev$flushIntervalMs / 1000
+        opts$all_attributes_private <- isTRUE(ev$allAttributesPrivate)
+        if (!is.null(ev$globalPrivateAttributes)) {
+          opts$private_attributes <- unlist(ev$globalPrivateAttributes, use.names = FALSE)
+        }
+      }
+
+      tags <- configuration$tags %||% list()
+      if (!is.null(tags$applicationId)) opts$application_id <- tags$applicationId
+      if (!is.null(tags$applicationVersion)) opts$application_version <- tags$applicationVersion
+
+      start_wait_ms <- configuration$startWaitTimeMs %||% 5000
+      cfg <- do.call(launchdarklyServer::ld_config, c(list(sdk_key = opts$sdk_key), opts[names(opts) != "sdk_key"]))
+      self$client <- launchdarklyServer::ld_client(cfg, start_wait = start_wait_ms / 1000)
+      self$initializing <- !self$client$is_initialized()
       invisible(self)
     },
 
     is_initializing = function() {
       isTRUE(self$initializing)
+    },
+
+    evaluate = function(params) {
+      ctx <- launchdarklyServer::context_from_list(params$context)
+      if (isTRUE(params$detail)) {
+        d <- self$client$variation_detail(params$flagKey, ctx, params$defaultValue)
+        list(
+          value = d$value,
+          variationIndex = d$variation_index,
+          reason = d$reason
+        )
+      } else {
+        list(value = self$client$variation(params$flagKey, ctx, params$defaultValue))
+      }
+    },
+
+    evaluate_all = function(params) {
+      ctx <- launchdarklyServer::context_from_list(params$context)
+      state <- self$client$all_flags_state(
+        ctx,
+        client_side_only = isTRUE(params$clientSideOnly),
+        with_reasons = isTRUE(params$withReasons),
+        details_only_for_tracked_flags = isTRUE(params$detailsOnlyForTrackedFlags)
+      )
+      list(state = state$to_json_list())
+    },
+
+    track = function(params) {
+      ctx <- launchdarklyServer::context_from_list(params$context)
+      self$client$track(params$eventKey, ctx, params$data, params$metricValue)
+      invisible(NULL)
+    },
+
+    identify = function(params) {
+      ctx <- launchdarklyServer::context_from_list(params$context)
+      self$client$identify(ctx)
+      invisible(NULL)
+    },
+
+    flush = function() {
+      self$client$flush()
+      invisible(NULL)
+    },
+
+    secure_mode_hash = function(params) {
+      ctx <- launchdarklyServer::context_from_list(params$context)
+      list(result = self$client$secure_mode_hash(ctx))
     },
 
     context_build = function(params) {
@@ -54,9 +130,7 @@ ClientEntity <- R6::R6Class(
     },
 
     close = function() {
-      if (!is.null(self$client) && is.function(self$client$close)) {
-        self$client$close()
-      }
+      if (!is.null(self$client)) self$client$close()
       invisible(NULL)
     }
   ),
@@ -85,3 +159,5 @@ ClientEntity <- R6::R6Class(
     }
   )
 )
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
