@@ -316,6 +316,7 @@ flush_events <- function() {
   }
   ev <- buffer$payload()
   res <- ld_post_events(config, ev)
+  if (!is.null(res$server_time)) buffer$set_server_time(res$server_time)
   if (isTRUE(res$unrecoverable)) {
     events_disabled <<- TRUE
     emit_log("error", sprintf("Event delivery received %s; analytics events disabled",

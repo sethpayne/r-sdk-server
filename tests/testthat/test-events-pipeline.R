@@ -55,6 +55,23 @@ test_that("debug events are emitted only while debugEventsUntilDate is in the fu
   expect_equal(dbg[[1]]$key, "f")
 })
 
+test_that("debug events stop once the server clock passes debugEventsUntilDate", {
+  now <- as.numeric(Sys.time()) * 1000
+  buf <- EventBuffer$new()
+  buf$set_server_time(now + 120000)
+  buf$process_eval(eval_rec(simple_flag("f", debugEventsUntilDate = now + 60000)))
+  expect_equal(kinds_of(buf$payload()), c("index", "summary"))
+})
+
+test_that("ld_post_events reports the server Date header", {
+  mock <- local_mock_ld()
+  mock$script("/bulk", list(status = 202L, headers = list(Date = "Mon, 18 Nov 2030 17:00:00 GMT")))
+  cfg <- ld_config("k", events_uri = mock$url)$to_list()
+  res <- ld_post_events(cfg, list(list(kind = "identify")), retry_delay = 0)
+  expect_equal(res$server_time, as.numeric(as.POSIXct("2030-11-18 17:00:00", tz = "GMT")) * 1000)
+  expect_null(.ld_response_date_ms(httr2::response(headers = list(Date = "garbage"))))
+})
+
 test_that("unknown flags are summarized with unknown = TRUE", {
   buf <- EventBuffer$new()
   detail <- list(value = "d", reason = list(kind = "ERROR", errorKind = "FLAG_NOT_FOUND"))

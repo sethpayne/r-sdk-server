@@ -29,6 +29,11 @@ EventBuffer <- R6::R6Class(
 
     dropped_count = function() private$dropped_,
 
+    set_server_time = function(ms) {
+      if (is.numeric(ms) && length(ms) == 1L && !is.na(ms)) private$last_server_time_ <- ms
+      invisible(self)
+    },
+
     reset_context_keys = function() {
       private$seen_ <- new.env(parent = emptyenv(), hash = TRUE)
       private$seen_order_ <- character()
@@ -112,7 +117,10 @@ EventBuffer <- R6::R6Class(
                          reason = rec$reason, prereq_of = rec$prereqOf, creation_date = ts)
       }
       du <- rec$debugEventsUntilDate
-      if (is.numeric(du) && length(du) == 1L && !is.na(du) && du > now) {
+      # Debugging also stops once LaunchDarkly's clock (from /bulk responses)
+      # has passed the deadline, even if the local clock lags.
+      if (is.numeric(du) && length(du) == 1L && !is.na(du) && du > now &&
+          du > private$last_server_time_) {
         self$add_feature(rec$key, ctx_list, rec$value, rec$default,
                          version = rec$version, variation = rec$variation,
                          reason = rec$reason, prereq_of = rec$prereqOf, creation_date = ts,
@@ -164,6 +172,7 @@ EventBuffer <- R6::R6Class(
     private_attrs_ = character(),
     events_ = NULL,
     dropped_ = 0L,
+    last_server_time_ = 0,
     seen_ = NULL,
     seen_order_ = NULL,
     context_keys_capacity_ = 1000L,
@@ -431,6 +440,16 @@ EventBuffer <- R6::R6Class(
   TRUE
 }
 
+# Server clock from the response `Date` header, in epoch milliseconds.
+.ld_response_date_ms <- function(resp) {
+  d <- httr2::resp_header(resp, "Date")
+  if (is.null(d)) return(NULL)
+  t <- tryCatch(curl::parse_date(d), error = function(e) NA)
+  # curl's parser overflows to negative values past 2038 on some platforms.
+  if (length(t) != 1L || is.na(t) || as.numeric(t) <= 0) return(NULL)
+  as.numeric(t) * 1000
+}
+
 #' POST events to LaunchDarkly events URI
 #'
 #' Retries once after `retry_delay` seconds on a recoverable failure, reusing
@@ -476,7 +495,8 @@ ld_post_events <- function(config, events, retry_delay = 1) {
     } else {
       status <- httr2::resp_status(resp)
       if (status < 300) {
-        return(list(ok = TRUE, status = status, count = length(events), payload_id = payload_id))
+        return(list(ok = TRUE, status = status, count = length(events), payload_id = payload_id,
+                    server_time = .ld_response_date_ms(resp)))
       }
       recoverable <- .ld_http_error_recoverable(status)
       last <- list(ok = FALSE, status = status, error = sprintf("events HTTP %s", status),
