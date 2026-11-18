@@ -98,10 +98,11 @@ test_that("context from_list multi and without_anonymous", {
   ))
   expect_true(context_valid(multi))
   expect_equal(context_individual_count(multi), 2L)
-  anon <- ld_context("a", anonymous = TRUE)
+  anon <- ld_context("a", kind = "device", anonymous = TRUE)
   filtered <- context_without_anonymous(context_create_multi(anon, ld_context("b")))
-  # May collapse to single-kind or stay multi depending on implementation
-  expect_true(is.character(context_error(filtered)) || context_valid(filtered) || !is.null(filtered))
+  expect_true(context_valid(filtered))
+  expect_equal(context_individual_count(filtered), 1L)
+  expect_equal(context_get_individual(filtered, 0L)$key, "b")
   expect_true("plan" %in% context_custom_attributes(ld_context("c", plan = "p")))
 })
 
@@ -122,7 +123,7 @@ test_that("poll error statuses and streaming goodbye/error via webfakes", {
   poll <- launchdarklyServer:::fdv2_poll_once(list(sdk_key = "k", base_uri = server$url(), read_timeout = 5))
   expect_false(poll$ok)
   # Header may be normalized; accept either explicit fallback flag or HTTP error
-  expect_true(isTRUE(poll$fallback_to_fdv1) || identical(poll$status, 403L) || grepl("403", poll$error %||% ""))
+  expect_true(poll$fallback_to_fdv1)
   stream <- suppressWarnings(launchdarklyServer:::fdv2_stream_once(list(
     sdk_key = "k", stream_uri = server$url(), read_timeout = 5
   )))

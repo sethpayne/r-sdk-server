@@ -17,7 +17,7 @@ Living matrix (updated as milestones land). Source of feature list: [python-serv
 | Feature (Python metadata / API) | Python | R plan | Notes |
 |---------------------------------|--------|--------|-------|
 | Contexts | yes (8.0+) | **done (M2)** | `ld_context` / builders; S3 + R6 builders |
-| `variation` / `variation_detail` | yes | **done (M5)** | Full evaluator |
+| `variation` / `variation_detail` | yes | **done (M5)** | Full evaluator; feature/summary/index events |
 | `all_flags_state` / allFlags | yes | **done (M5)** | Bootstrap / front-end state |
 | `track` / custom events | yes | **done (M6)** | EventBuffer + `/bulk` |
 | `identify` | yes | **done (M6)** | |
@@ -34,7 +34,7 @@ Living matrix (updated as milestones land). Source of feature list: [python-serv
 | Event compression | yes | **later** | Nice-to-have bandwidth |
 | Polling response compression | yes | **later** | |
 | Inline context (eval/custom events) | yes | **done (M6)** | Schema 4 inline context |
-| Omit anonymous contexts | yes | **later** | Config flag parity |
+| Omit anonymous contexts | yes | **done** | `omit_anonymous_contexts` (index/identify) |
 | Experimentation (event roles) | yes | **partial** | `inExperiment` on eval; summary event polish later |
 | Diagnostics | yes | **later** | Opt-in diagnostic events |
 | File data source (FDv2 initializer) | yes | **later** | |

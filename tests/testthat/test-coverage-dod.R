@@ -28,7 +28,7 @@ test_that("evaluator: targets, prereqs, experiments, segments, kind clauses", {
   )
   multi <- context_create_multi(ld_context("u1"), ld_context("acme", kind = "org"))
   d3 <- launchdarklyServer:::ld_evaluate_flag(flag_ct, multi, "d", function(k) NULL, get_seg)
-  expect_true(d3$value %in% c("b", "c"))
+  expect_equal(d3$value, "b")
 
   # Prerequisite failed (missing / wrong variation)
   child <- list(
@@ -73,7 +73,7 @@ test_that("evaluator: targets, prereqs, experiments, segments, kind clauses", {
     ))
   )
   d7 <- launchdarklyServer:::ld_evaluate_flag(exp, ld_context("u"), "d", function(k) NULL, get_seg)
-  expect_true(d7$value %in% c("a", "b"))
+  expect_equal(d7$value, "b")
 
   # bucket context missing kind → -1
   expect_equal(
@@ -284,10 +284,12 @@ test_that("context builders, multi, JSON, and accessors", {
   mb2 <- context_multi_builder()
   mb2$add(m)
   out1 <- mb2$build()
-  expect_true(context_multiple(out1) || context_valid(out1))
+  expect_true(context_valid(out1))
+  expect_true(context_multiple(out1))
   mb2$add(ld_context("z", kind = "device"))
   out2 <- mb2$build()
-  expect_true(context_valid(out2) || !is.null(context_error(out2)))
+  expect_true(context_valid(out2))
+  expect_equal(context_individual_count(out2), context_individual_count(out1) + 1L)
 
   j <- context_to_json(m)
   expect_true(nzchar(j))
@@ -426,7 +428,7 @@ test_that("fdv2 polling helpers and local poll", {
   on.exit(s2$stop(), add = TRUE)
   res2 <- launchdarklyServer:::fdv2_poll_once(list(sdk_key = "k", base_uri = s2$url(), read_timeout = 3))
   expect_false(res2$ok)
-  expect_true(!is.null(res2$status) || grepl("401|HTTP", res2$error %||% "", perl = FALSE) || !isTRUE(res2$ok))
+  expect_equal(res2$status, 401L)
 
   res3 <- launchdarklyServer:::fdv2_poll_once(list(sdk_key = "k", base_uri = "http://127.0.0.1:1", read_timeout = 1))
   expect_false(res3$ok)
@@ -499,15 +501,17 @@ test_that("fdv2 streaming helpers and local curl-multi stream", {
     connect_timeout = 2
   )
   got <- NULL
-  # Finite httpuv body often fails req_perform_connection; fallback parser should work
+  # An in-process httpuv server cannot answer while fdv2_stream_once() blocks
+  # this R process, so only the timeout path runs here; the webfakes block
+  # below covers a successful stream.
   res <- launchdarklyServer:::fdv2_stream_once(
     cfg, list(state = "basis", version = 0L),
     on_changeset = function(cs) got <<- cs,
     until_first_payload = TRUE
   )
-  # Either multi path or finite-body fallback may succeed
-  expect_true(isTRUE(res$ok) || identical(res$error, "stream incomplete") ||
-                grepl("HTTP|Failed|Timeout|stream", res$error %||% ""))
+  expect_false(res$ok)
+  expect_true(nzchar(res$error))
+  expect_null(got)
 
   # 401 path
   port2 <- httpuv::randomPort()

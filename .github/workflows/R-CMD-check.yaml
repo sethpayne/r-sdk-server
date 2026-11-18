@@ -22,6 +22,8 @@ jobs:
           - { os: ubuntu-latest,  r: "release" }
           - { os: ubuntu-latest,  r: "devel" }
           - { os: ubuntu-latest,  r: "oldrel-1" }
+          # Minimum supported R (DESCRIPTION: R >= 4.1)
+          - { os: ubuntu-latest,  r: "4.1" }
           - { os: macos-latest,   r: "release" }
           - { os: windows-latest, r: "release" }
     env:
@@ -64,7 +66,7 @@ jobs:
           use-public-bspm: true
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::covr, any::testthat, any::pkgload, any::webfakes, any::httpuv, any::processx
+          extra-packages: any::covr, any::testthat, any::pkgload, any::webfakes, any::httpuv, any::processx, any::withr
           needs: coverage
       - name: Coverage gate (≥90% on core modules)
         run: Rscript scripts/coverage-gate.R

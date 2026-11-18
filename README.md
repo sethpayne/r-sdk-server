@@ -40,6 +40,15 @@ td$apply_to_client(client)
 
 A **callr/processx background worker** owns FDv2 sync and the event buffer. The parent process evaluates against a local store snapshot. See [DESIGN.md](DESIGN.md).
 
+## Unit and integration tests
+
+```bash
+NOT_CRAN=true Rscript -e 'devtools::test()'   # full suite, incl. mock-service tests
+Rscript scripts/coverage-gate.R               # ≥90% on evaluator/context/data system/events
+```
+
+Tests that start a worker against the webfakes mock service (`tests/testthat/helper-mock-ld.R`) are skipped on CRAN; fork tests are skipped on Windows.
+
 ## Contract tests
 
 ```bash

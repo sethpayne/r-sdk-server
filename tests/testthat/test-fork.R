@@ -1,4 +1,7 @@
 # Fork safety (S2): a forked child must not use the parent's worker pipe.
+#
+# processx's SIGCHLD handler can reap mcparallel children before parallel does,
+# so R may print "Error while shutting down parallel" at exit; it is harmless.
 
 skip_if_no_fork <- function() {
   skip_on_os("windows")

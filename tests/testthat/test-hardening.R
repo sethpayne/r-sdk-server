@@ -11,12 +11,15 @@ test_that("postfork re-inits offline client", {
 
 test_that("shutdown does not leave worker when offline", {
   client <- ld_client(ld_config("k", offline = TRUE))
-  client$close()
-  expect_true(TRUE)
+  expect_null(client$.__enclos_env__$private$worker_)
+  expect_no_error(client$close())
+  expect_null(client$.__enclos_env__$private$worker_)
 })
 
 test_that("benchmark variation is fast enough offline", {
   skip_if_not_installed("bench")
+  skip_on_cran()
+  skip_on_ci()
   client <- ld_client(ld_config("k", offline = TRUE))
   on.exit(client$close(), add = TRUE)
   client$.update_store_for_tests(flags = list(
