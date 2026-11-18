@@ -76,6 +76,7 @@ Unless a future LaunchDarkly review requires parity:
 - Relay-as-proxy via URI overrides beyond basic config  
 - Package singleton helpers  
 - Full streaming HTTP retry-status matrix (reconnect + poll fallback exist; see suppressions)  
-- covr ≥90% on evaluator/context/data/events (currently ~70–80% parent-process; worker IPC lost to covr)  
 
 Reasons: shrink v1 to correct FDv2 evaluation + events + process safety; add integrations after the core is harness-green.
+
+**Coverage (v1 DoD):** hard gate ≥90% on evaluator / context / data_system / event_processor via offline tests (measured ~95.3% / 93.7% / ≥90% / 95.9%). Worker IPC (`process-worker.R` / `inst/worker`) excluded per NOTES.md D24.

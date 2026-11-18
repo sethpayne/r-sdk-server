@@ -65,6 +65,9 @@ fdv2_poll_once <- function(config, selector = NULL, base_uri = NULL) {
     req <- httr2::req_url_query(req, !!!query)
   }
 
+  # Return 4xx/5xx bodies so callers can read X-LD-FD-Fallback / EnvID headers
+  # (httr2 otherwise throws before we can inspect the response).
+  req <- httr2::req_error(req, is_error = function(resp) FALSE)
   resp <- tryCatch(
     httr2::req_perform(req),
     error = function(e) e
