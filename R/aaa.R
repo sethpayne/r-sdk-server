@@ -10,3 +10,7 @@
 
 LD_KIND_FLAG <- "flag"
 LD_KIND_SEGMENT <- "segment"
+
+.ld_valid_key <- function(key) {
+  is.character(key) && length(key) == 1L && !is.na(key) && nzchar(key)
+}

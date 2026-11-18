@@ -12,14 +12,18 @@ NULL
 #' @param default Default value.
 #' @param get_flag function(key) -> flag|NULL
 #' @param get_segment function(key) -> segment|NULL
+#' @param prereq_events Optional environment; when supplied, each evaluated
+#'   prerequisite is appended to `prereq_events$events` as
+#'   `list(flag, detail, prereq_of)` for analytics events.
 #' @return `ld_evaluation_detail`
 #' @keywords internal
-ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
+ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment, prereq_events = NULL) {
   state <- new.env(parent = emptyenv())
   state$prereq_stack <- character()
   state$segment_stack <- character()
   state$original_flag_key <- flag$key
-  state$events <- list()
+  state$prereq_events <- prereq_events
+  if (!is.null(prereq_events) && is.null(prereq_events$events)) prereq_events$events <- list()
 
   detail <- tryCatch(
     .ld_eval_flag(flag, context, state, get_flag, get_segment),
@@ -47,8 +51,8 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
 
 .ld_get_variation <- function(flag, variation, reason) {
   vars <- flag$variations %||% list()
-  idx <- as.integer(variation)
-  if (is.na(idx) || idx < 0L || idx >= length(vars)) {
+  idx <- suppressWarnings(as.integer(variation))
+  if (length(idx) != 1L || is.na(idx) || idx < 0L || idx >= length(vars)) {
     return(evaluation_detail(NULL, NULL, list(kind = "ERROR", errorKind = "MALFORMED_FLAG")))
   }
   evaluation_detail(vars[[idx + 1L]], idx, reason)
@@ -107,6 +111,10 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
       return(list(kind = "PREREQUISITE_FAILED", prerequisiteKey = pk))
     }
     pres <- .ld_eval_flag(pflag, context, state, get_flag, get_segment)
+    if (!is.null(state$prereq_events)) {
+      pe <- state$prereq_events
+      pe$events[[length(pe$events) + 1L]] <- list(flag = pflag, detail = pres, prereq_of = flag$key)
+    }
     if (!isTRUE(pflag$on) || !identical(as.integer(pres$variation_index), as.integer(prereq$variation))) {
       return(list(kind = "PREREQUISITE_FAILED", prerequisiteKey = pk))
     }
@@ -325,10 +333,14 @@ ld_evaluate_flag <- function(flag, context, default, get_flag, get_segment) {
   if (is.null(actual)) return(FALSE)
   ctx_value <- .ld_attr_value(actual, attr, literal = literal)
   if (is.null(ctx_value)) return(FALSE)
+  if (is.factor(ctx_value)) ctx_value <- as.character(ctx_value)
 
-  if (is.list(ctx_value) && is.null(names(ctx_value))) {
-    # array
-    for (v in ctx_value) {
+  # Arrays: JSON arrays (unnamed lists) and R atomic vectors of length != 1.
+  is_array <- (is.list(ctx_value) && is.null(names(ctx_value))) ||
+    (is.atomic(ctx_value) && length(ctx_value) != 1L)
+  if (is_array) {
+    if (is.factor(ctx_value)) ctx_value <- as.character(ctx_value)
+    for (v in as.list(ctx_value)) {
       if (.ld_match_clause_values(clause, v)) return(.ld_maybe_negate(clause, TRUE))
     }
     return(.ld_maybe_negate(clause, FALSE))

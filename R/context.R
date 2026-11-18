@@ -18,6 +18,9 @@ LD_CONTEXT_MULTI_KIND <- "multi"
 }
 
 .ld_validate_kind <- function(kind) {
+  if (!is.character(kind) || length(kind) != 1L || is.na(kind)) {
+    return("context kind must be a single string")
+  }
   if (identical(kind, "")) {
     return("context kind must not be empty")
   }
@@ -59,6 +62,9 @@ LD_CONTEXT_MULTI_KIND <- "multi"
   kind_error <- .ld_validate_kind(kind)
   if (!is.null(kind_error)) {
     return(.ld_make_invalid(kind_error))
+  }
+  if (!is.character(key) || length(key) != 1L || is.na(key)) {
+    return(.ld_make_invalid("context key must be a single non-NA string"))
   }
   if (identical(key, "") && !isTRUE(allow_empty_key)) {
     return(.ld_make_invalid("context key must not be None or empty"))
@@ -537,6 +543,7 @@ ContextBuilder <- R6::R6Class(
         private$attributes_ <- if (is.null(private$attributes_)) NULL else as.list(private$attributes_)
       }
       if (is.null(private$attributes_)) private$attributes_ <- list()
+      if (is.factor(value)) value <- as.character(value)
       if (is.null(value)) {
         private$attributes_[[attribute]] <- NULL
       } else {
