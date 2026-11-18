@@ -36,10 +36,29 @@ LdConfig <- R6::R6Class(
     poll_init_uris = NULL,
     stream_only = FALSE,
     skip_poll_init = FALSE,
+    context_keys_capacity = 1000L,
+    context_keys_flush_interval = 300,
 
     #' @param sdk_key LaunchDarkly SDK key.
     initialize = function(sdk_key = "") {
       self$sdk_key <- as.character(sdk_key)
+      invisible(self)
+    },
+
+    #' @description One line per option; the SDK key is masked.
+    format = function(...) {
+      fields <- setdiff(.ld_config_fields(self), "sdk_key")
+      key <- if (length(self$sdk_key) == 1L && nzchar(self$sdk_key)) "<redacted>" else "<unset>"
+      vals <- vapply(fields, function(f) {
+        v <- self[[f]]
+        if (is.null(v)) "NULL" else paste(format(v), collapse = ", ")
+      }, character(1))
+      c("<LdConfig>", paste0("  sdk_key: ", key), paste0("  ", fields, ": ", vals))
+    },
+
+    #' @description Print without revealing the SDK key.
+    print = function(...) {
+      cat(self$format(...), sep = "\n")
       invisible(self)
     },
 
@@ -73,7 +92,9 @@ LdConfig <- R6::R6Class(
         fallback_stream_uri = self$fallback_stream_uri,
         poll_init_uris = as.list(self$poll_init_uris %||% list()),
         stream_only = isTRUE(self$stream_only),
-        skip_poll_init = isTRUE(self$skip_poll_init)
+        skip_poll_init = isTRUE(self$skip_poll_init),
+        context_keys_capacity = self$context_keys_capacity,
+        context_keys_flush_interval = self$context_keys_flush_interval
       )
     }
   )
@@ -87,12 +108,43 @@ LdConfig <- R6::R6Class(
 ld_config <- function(sdk_key = "", ...) {
   cfg <- LdConfig$new(sdk_key)
   dots <- list(...)
+  fields <- .ld_config_fields(cfg)
   for (nm in names(dots)) {
-    if (!nm %in% names(cfg)) {
+    if (!nm %in% fields) {
       warning(sprintf("Unknown config option '%s' ignored", nm), call. = FALSE)
       next
     }
-    cfg[[nm]] <- dots[[nm]]
+    val <- dots[[nm]]
+    if (nm %in% .ld_config_numeric_fields &&
+        !(is.numeric(val) && length(val) == 1L && !is.na(val) && val >= 0)) {
+      warning(sprintf(
+        "Config option '%s' must be a single non-negative number; using default %s",
+        nm, format(cfg[[nm]])
+      ), call. = FALSE)
+      next
+    }
+    if (nm %in% .ld_config_logical_fields && !(is.logical(val) && length(val) == 1L && !is.na(val))) {
+      warning(sprintf(
+        "Config option '%s' must be TRUE or FALSE; using default %s", nm, format(cfg[[nm]])
+      ), call. = FALSE)
+      next
+    }
+    cfg[[nm]] <- val
   }
   cfg
+}
+
+.ld_config_numeric_fields <- c(
+  "poll_interval", "start_wait", "events_capacity", "flush_interval", "connect_timeout",
+  "read_timeout", "initial_reconnect_delay", "context_keys_capacity", "context_keys_flush_interval"
+)
+
+.ld_config_logical_fields <- c(
+  "offline", "stream", "send_events", "all_attributes_private", "diagnostic_opt_out",
+  "omit_anonymous_contexts", "stream_only", "skip_poll_init"
+)
+
+.ld_config_fields <- function(cfg) {
+  nms <- setdiff(ls(cfg, sorted = TRUE), c(".__enclos_env__", "clone"))
+  nms[!vapply(nms, function(n) is.function(cfg[[n]]), logical(1))]
 }
