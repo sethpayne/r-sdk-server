@@ -362,7 +362,7 @@ EventBuffer <- R6::R6Class(
     }
     ret[k] <- list(.ld_redact_json_value(c(path, k), value[[k]], refs, redacted))
   }
-  if (length(ret) == 0L) ret <- setNames(list(), character())
+  if (length(ret) == 0L) ret <- structure(list(), names = character())
   ret
 }
 
