@@ -51,7 +51,7 @@ None that block M2–M10. Official SDK name / user-agent remains pending LaunchD
 
 ## Suppressions
 
-N/A until harness CI (see later milestones). Planned: migrations / big-segments / persistent-store / hooks / OTEL / FDv1 suites with justifications in `suppressions.txt`.
+See `contract-tests/suppressions.txt` — migrations, big-segments, persistent stores, FDv1 retry suites, OTEL/plugins (justifications inline).
 
 ---
 

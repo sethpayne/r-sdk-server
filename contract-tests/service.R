@@ -43,7 +43,11 @@ capabilities <- c(
   "all-flags-client-side-only",
   "all-flags-details-only-for-tracked-flags",
   "secure-mode-hash",
-  "inline-context-all"
+  "inline-context-all",
+  "tags",
+  "service-endpoints",
+  "flag-change-listeners",
+  "flag-value-change-listeners"
 )
 
 json_response <- function(status, body, headers = list()) {

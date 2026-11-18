@@ -1,2 +1,19 @@
-# sdk-test-harness suppressions (justifications required).
-# Empty for M3 — only context suites are expected to run.
+# sdk-test-harness v3 suppressions — each line needs a justification.
+
+# Migrations API is explicitly out of scope (FEATURES.md).
+# migrations
+
+# Big segments require an external store — out of scope.
+# big-segments
+
+# Persistent feature stores (Redis/Dynamo/Consul) — out of scope.
+# persistent-data-store
+
+# FDv1 protocol is not implemented; we fail-safe + log on fdv1Fallback.
+# fdv1-fallback-sync
+# retry-conformance-fdv1-streaming
+# retry-conformance-fdv1-polling
+
+# OpenTelemetry / plugins — out of scope for v1.
+# otel
+# plugins
