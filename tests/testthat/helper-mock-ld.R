@@ -19,7 +19,7 @@
     locals <- req$app$locals
     body <- if (is.raw(req$.body)) rawToChar(req$.body) else ""
     locals$log[[length(locals$log) + 1L]] <- list(
-      method = req$method,
+      method = toupper(req$method),
       path = req$path,
       query = req$query_string,
       headers = as.list(req$headers),

@@ -7,12 +7,18 @@ from_json <- function(txt) jsonlite::fromJSON(txt, simplifyVector = FALSE)
 
 read_fixture <- function(...) from_json(paste(readLines(fixture_path(...), warn = FALSE), collapse = "\n"))
 
-simple_flag <- function(key, value_on = TRUE, version = 1L, ...) {
-  c(list(
+# On flag serving variation 1 (`value_on`) on fallthrough; `...` overrides or
+# adds fields.
+simple_flag <- function(key, value_on = TRUE, version = 1L, ...,
+                        value_off = if (is.logical(value_on)) !value_on else "off") {
+  flag <- list(
     key = key, version = version, on = TRUE, salt = "salt",
-    variations = list(!value_on, value_on), offVariation = 0L,
+    variations = list(value_off, value_on), offVariation = 0L,
     fallthrough = list(variation = 1L)
-  ), list(...))
+  )
+  extra <- list(...)
+  flag[names(extra)] <- extra
+  flag
 }
 
 fdv2_events <- function(flags = list(), segments = list(), state = "state-1", version = 1L,
