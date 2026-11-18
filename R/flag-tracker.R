@@ -4,7 +4,10 @@
 FlagTracker <- R6::R6Class(
   "FlagTracker",
   public = list(
-    initialize = function() {
+    #' @param eval_fn Optional function(flag_key, context) -> value, used to
+    #'   record each value listener's starting value.
+    initialize = function(eval_fn = NULL) {
+      private$eval_fn_ <- eval_fn
       private$flag_listeners_ <- list()
       private$value_listeners_ <- list()
       invisible(self)
@@ -18,8 +21,13 @@ FlagTracker <- R6::R6Class(
 
     add_flag_value_change_listener = function(flag_key, context, callback) {
       id <- private$next_id()
+      initial <- if (is.function(private$eval_fn_)) {
+        tryCatch(private$eval_fn_(flag_key, context), error = function(e) NULL)
+      } else {
+        NULL
+      }
       private$value_listeners_[[id]] <- list(
-        flag_key = flag_key, context = context, callback = callback, last = NULL
+        flag_key = flag_key, context = context, callback = callback, last = initial
       )
       id
     },
@@ -48,7 +56,7 @@ FlagTracker <- R6::R6Class(
           val <- eval_fn(vl$flag_key, vl$context)
           if (!identical(val, vl$last)) {
             try(vl$callback(list(key = vl$flag_key, oldValue = vl$last, newValue = val)), silent = TRUE)
-            private$value_listeners_[[id]]$last <- val
+            private$value_listeners_[[id]]["last"] <- list(val)
           }
         }
       }
@@ -56,6 +64,7 @@ FlagTracker <- R6::R6Class(
     }
   ),
   private = list(
+    eval_fn_ = NULL,
     flag_listeners_ = NULL,
     value_listeners_ = NULL,
     seq_ = 0L,

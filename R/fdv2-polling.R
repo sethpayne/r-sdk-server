@@ -93,7 +93,14 @@ fdv2_poll_once <- function(config, selector = NULL, base_uri = NULL) {
     ))
   }
 
-  data <- httr2::resp_body_json(resp, simplifyVector = FALSE)
+  data <- tryCatch(
+    jsonlite::fromJSON(httr2::resp_body_string(resp, encoding = "UTF-8"), simplifyVector = FALSE),
+    error = function(e) structure(list(), class = "ld_json_error")
+  )
+  if (inherits(data, "ld_json_error")) {
+    return(list(ok = FALSE, error = "polling response was not valid JSON", status = status,
+                headers = headers, fallback_to_fdv1 = fallback))
+  }
   cs <- fdv2_polling_payload_to_changeset(data)
   if (!is.null(cs$error)) {
     return(list(ok = FALSE, error = cs$error, headers = headers, fallback_to_fdv1 = fallback))
