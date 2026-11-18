@@ -1,0 +1,2 @@
+# sdk-test-harness suppressions (justifications required).
+# Empty for M3 — only context suites are expected to run.
