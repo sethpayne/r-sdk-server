@@ -37,7 +37,13 @@ clients <- new.env(parent = emptyenv())
 
 capabilities <- c(
   "server-side",
-  "context-type"
+  "server-side-polling",
+  "context-type",
+  "all-flags-with-reasons",
+  "all-flags-client-side-only",
+  "all-flags-details-only-for-tracked-flags",
+  "secure-mode-hash",
+  "inline-context-all"
 )
 
 json_response <- function(status, body, headers = list()) {
@@ -120,7 +126,19 @@ app <- function(req) {
       sub <- params[[command]]
 
       response <- NULL
-      if (identical(command, "contextBuild")) {
+      if (identical(command, "evaluate")) {
+        response <- entity$evaluate(sub)
+      } else if (identical(command, "evaluateAll")) {
+        response <- entity$evaluate_all(sub)
+      } else if (identical(command, "customEvent")) {
+        entity$track(sub)
+      } else if (identical(command, "identifyEvent")) {
+        entity$identify(sub)
+      } else if (identical(command, "flushEvents")) {
+        entity$flush()
+      } else if (identical(command, "secureModeHash")) {
+        response <- entity$secure_mode_hash(sub)
+      } else if (identical(command, "contextBuild")) {
         response <- entity$context_build(sub)
       } else if (identical(command, "contextConvert")) {
         response <- entity$context_convert(sub)
