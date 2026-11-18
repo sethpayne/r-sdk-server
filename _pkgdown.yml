@@ -1,0 +1,18 @@
+url: https://sethpayne.github.io/r-sdk-server/
+
+template:
+  bootstrap: 5
+
+home:
+  title: launchdarklyServer (unofficial)
+  description: Unofficial LaunchDarkly FDv2 server-side SDK for R.
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+  components:
+    articles:
+      text: Articles
+      menu:
+        - text: Getting started
+          href: articles/getting-started.html

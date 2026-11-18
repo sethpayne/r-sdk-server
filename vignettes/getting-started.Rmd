@@ -1,0 +1,25 @@
+---
+title: "Getting started with launchdarklyServer"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with launchdarklyServer}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+This package is an **unofficial** LaunchDarkly server-side SDK for R.
+
+```{r}
+library(launchdarklyServer)
+
+client <- ld_client(ld_config("sdk-key", offline = TRUE))
+ctx <- ld_context("user-1", country = "us")
+client$variation("flag", ctx, FALSE)
+client$close()
+```
+
+For architecture details see `DESIGN.md` in the repository root.

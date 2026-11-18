@@ -20,6 +20,8 @@ LdClient <- R6::R6Class(
       private$initialized_ <- FALSE
       private$fork_warned_ <- FALSE
       private$data_status_ <- if (isTRUE(config$offline)) "off" else "initializing"
+      private$hooks_ <- list()
+      private$flag_tracker_ <- FlagTracker$new()
 
       wait <- start_wait %||% config$start_wait %||% 5
 
@@ -139,6 +141,13 @@ LdClient <- R6::R6Class(
       digest::hmac(private$config_$sdk_key, key, algo = "sha256", serialize = FALSE)
     },
 
+    add_hook = function(hook) {
+      private$hooks_ <- c(private$hooks_, list(hook))
+      invisible(self)
+    },
+
+    flag_tracker = function() private$flag_tracker_,
+
     postfork = function() {
       # Tear down inherited worker handles and start fresh in this PID
       private$owner_pid_ <- Sys.getpid()
@@ -181,6 +190,8 @@ LdClient <- R6::R6Class(
     initialized_ = FALSE,
     fork_warned_ = FALSE,
     data_status_ = NULL,
+    hooks_ = NULL,
+    flag_tracker_ = NULL,
 
     check_fork = function() {
       if (Sys.getpid() != private$owner_pid_) {
@@ -204,12 +215,18 @@ LdClient <- R6::R6Class(
       type <- msg$type
       payload <- msg$payload %||% list()
       if (identical(type, "StoreSnapshot")) {
+        old <- private$store_$all_flags()
         private$store_$replace_all(
           flags = payload$flags %||% list(),
           segments = payload$segments %||% list(),
           selector = payload$selector
         )
         private$initialized_ <- TRUE
+        private$flag_tracker_$notify_store_update(
+          old,
+          private$store_$all_flags(),
+          eval_fn = function(key, ctx) private$evaluate_internal(key, ctx, NULL)$value
+        )
       } else if (identical(type, "Ready")) {
         if (isTRUE(payload$initialized) || isTRUE(payload$offline) || isTRUE(payload$fail_safe)) {
           private$initialized_ <- TRUE
@@ -239,13 +256,19 @@ LdClient <- R6::R6Class(
     },
 
     evaluate_flag = function(flag, context, default) {
-      ld_evaluate_flag(
-        flag,
-        context,
-        default,
-        get_flag = function(k) private$store_$get_flag(k),
-        get_segment = function(k) private$store_$get_segment(k)
-      )
+      eval_fn <- function(series_ctx) {
+        ld_evaluate_flag(
+          flag,
+          series_ctx$context %||% context,
+          default,
+          get_flag = function(k) private$store_$get_flag(k),
+          get_segment = function(k) private$store_$get_segment(k)
+        )
+      }
+      if (length(private$hooks_) == 0L) {
+        return(eval_fn(list(context = context, flag_key = flag$key)))
+      }
+      .ld_with_hooks(private$hooks_, list(context = context, flag_key = flag$key), eval_fn)
     }
   )
 )

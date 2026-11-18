@@ -1,28 +1,54 @@
-# launchdarklyServer (unofficial)
+# launchdarklyServer
 
-**This is an unofficial, community/experimental LaunchDarkly server-side SDK for R.**  
-It is **not** affiliated with, endorsed by, or supported by LaunchDarkly, Inc. Do not use LaunchDarkly logos or imply official status. The official SDK name and identity strings are **pending LaunchDarkly assignment** (see `R/constants.R`).
+**Unofficial** LaunchDarkly server-side SDK for R (FDv2).
 
-| | |
-|---|---|
-| R package | `launchdarklyServer` |
-| Intended GitHub name | `r-server-sdk` (see NOTES.md if the remote differs) |
-| Protocol | Flag Delivery **v2** only |
-| License | Apache-2.0 |
+> Not affiliated with or endorsed by LaunchDarkly, Inc. Official SDK name and user-agent identity remain pending LaunchDarkly assignment. Do not use LaunchDarkly logos or trademarks in a way that implies endorsement.
+
+## Install
 
 ```r
-# Not usable yet — Milestone 1 is design + skeleton only.
-# library(launchdarklyServer)
+# remotes::install_github("sethpayne/r-sdk-server")
 ```
 
-## Docs in this repo
+## Quick start
 
-- [`DESIGN.md`](DESIGN.md) — process model, FDv2, API, threats  
-- [`FEATURES.md`](FEATURES.md) — parity matrix vs python-server-sdk  
-- [`NOTES.md`](NOTES.md) — decisions and open questions  
+```r
+library(launchdarklyServer)
 
-Full user documentation is **Milestone 10**. This README stays short on purpose.
+cfg <- ld_config(
+  Sys.getenv("LAUNCHDARKLY_SDK_KEY"),
+  start_wait = 5,
+  stream = TRUE
+)
+client <- ld_client(cfg)
+on.exit(client$close(), add = TRUE)
+
+ctx <- ld_context("user-123", email = "user@example.com")
+value <- client$variation("my-flag", ctx, FALSE)
+```
+
+Offline / tests:
+
+```r
+client <- ld_client(ld_config("any", offline = TRUE))
+td <- ld_test_data()
+td$flag("my-flag", on = TRUE, variations = list(FALSE, TRUE), fallthrough = list(variation = 1L))
+td$apply_to_client(client)
+```
+
+## Process model
+
+A **callr/processx background worker** owns FDv2 sync and the event buffer. The parent process evaluates against a local store snapshot. See [DESIGN.md](DESIGN.md).
+
+## Contract tests
+
+```bash
+Rscript contract-tests/service.R 8000
+# Point sdk-test-harness v3 at http://127.0.0.1:8000
+```
+
+Suppressions (with justifications) live in `contract-tests/suppressions.txt`.
 
 ## Status
 
-Milestone **1** (design + package skeleton) only. Implementation starts in later milestones after human review.
+See [FEATURES.md](FEATURES.md) and [CHANGELOG.md](CHANGELOG.md). License: Apache-2.0.
